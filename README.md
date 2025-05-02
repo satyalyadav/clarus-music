@@ -3,13 +3,11 @@
 A full-stack web application for managing and playing your personal music library.  
 Built with React, Node.js, Express, and PostgreSQL.
 
----
-
 ## Prerequisites
 
 Before you begin, ensure you have the following installed on your system:
 
-- **Node.js** (v18 or later recommended) and npm 
+- **Node.js** (v18 or later recommended)
 - **PostgreSQL** (v14 or later recommended) — a running PostgreSQL server instance  
 
 ---
@@ -43,11 +41,7 @@ Before you begin, ensure you have the following installed on your system:
      _Note: The quotes are important if your database name contains spaces._
 
    - **Create Tables**  
-     From your terminal, run:  
-     ```bash
-     psql -d "Music Library" -U <your_postgres_user> -f backend/schema.sql
-     ```
-     Replace `<your_postgres_user>` with your PostgreSQL username.
+     Run `backend/schema.sql` manually in psql or using the Query Tool in pgAdmin.
 
 4. **Environment Variables**
 
@@ -55,6 +49,7 @@ Before you begin, ensure you have the following installed on your system:
      In the `backend` folder, create a file named `.env`:  
      ```ini
      # PostgreSQL connection URL (encode space in "Music Library" as %20)
+     # The default port is 5432. Check your port and change accordingly.
      DATABASE_URL=postgresql://<user>:<password>@<host>:<port>/Music%20Library
 
      # IMPORTANT: Change this to a strong, unique secret for JWT
@@ -74,7 +69,11 @@ Before you begin, ensure you have the following installed on your system:
 5. **Create Uploads Directory**  
    In the `backend` directory, manually create the folder where uploaded audio files will be stored:  
    ```bash
+   Linux/macOS:
    mkdir backend/uploads
+
+   Windows:
+   mkdir backend\uploads
    ```
    _Note: This folder is included in the `.gitignore`, so it won't be tracked by Git, but it needs to exist for the application to save uploaded songs._
 
@@ -84,4 +83,5 @@ Before you begin, ensure you have the following installed on your system:
    npm run dev
    ```
    This will start both your backend and the frontend development server concurrently.  
-   Once everything is up, open your browser and navigate to the URL provided by Vite (e.g., `http://localhost:5173`).
+   Once everything is up, open your browser and navigate to the URL provided by Vite (e.g., `http://localhost:5173`).  
+```
