@@ -50,6 +50,7 @@ Before you begin, ensure you have the following installed on your system:
      ```ini
      # PostgreSQL connection URL (encode space in "Music Library" as %20)
      # The default port is 5432. Check your port and change accordingly.
+     # Replace the <user>, <password>, and <host> with your own PostgreSQL credentials.
      DATABASE_URL=postgresql://<user>:<password>@<host>:<port>/Music%20Library
 
      # IMPORTANT: Change this to a strong, unique secret for JWT
