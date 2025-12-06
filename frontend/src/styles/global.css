@@ -102,28 +102,6 @@ body {
   align-items: center;
 }
 
-.header-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.header-label {
-  font-size: 11px;
-  color: var(--text-muted);
-  text-transform: lowercase;
-}
-
-.header-value {
-  font-size: 13px;
-  color: var(--text-primary);
-  text-decoration: none;
-}
-
-.header-value:hover {
-  color: var(--accent-color);
-}
-
 .header-title {
   font-size: 13px;
   color: var(--text-primary);
@@ -195,11 +173,6 @@ body {
   font-weight: 600;
   color: var(--text-primary);
   margin-bottom: 24px;
-}
-
-.section-title span {
-  color: var(--text-muted);
-  font-weight: 400;
 }
 
 /* Buttons */
@@ -309,19 +282,6 @@ body {
 
 .form-row .form-group {
   flex: 1;
-}
-
-/* Cards */
-.card {
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 16px;
-  transition: all 0.2s ease;
-}
-
-.card:hover {
-  border-color: var(--accent-color);
 }
 
 /* Lists */
@@ -664,80 +624,6 @@ body {
   stroke-width: 1.4;
   stroke-linecap: round;
   stroke-linejoin: round;
-}
-
-/* Tabs */
-.tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 24px;
-  border-bottom: 1px solid var(--border-color);
-  padding-bottom: 0;
-}
-
-.tab {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 13px;
-  padding: 10px 16px;
-  border: none;
-  background: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  transition: all 0.2s ease;
-}
-
-.tab:hover {
-  color: var(--text-primary);
-}
-
-.tab.active {
-  color: var(--accent-color);
-  border-bottom-color: var(--accent-color);
-}
-
-/* Badges */
-.badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 4px;
-  background: var(--button-hover);
-  color: var(--text-secondary);
-}
-
-.badge-accent {
-  background: var(--accent-color);
-  color: #ffffff;
-}
-
-/* Tooltips */
-[data-tooltip] {
-  position: relative;
-}
-
-[data-tooltip]::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  top: calc(100% + 10px);
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 4px 8px;
-  font-size: 11px;
-  background: var(--text-primary);
-  color: var(--bg-color);
-  border-radius: 4px;
-  white-space: nowrap;
-  opacity: 0;
-  visibility: hidden;
-  transition: all 0.2s ease;
-}
-
-[data-tooltip]:hover::after {
-  opacity: 1;
-  visibility: visible;
 }
 
 /* Responsive */
