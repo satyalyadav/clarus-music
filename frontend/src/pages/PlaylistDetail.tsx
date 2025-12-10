@@ -143,7 +143,6 @@ const PlaylistDetail: React.FC = () => {
           </div>
         )}
         <div>
-          <p className="section-label">//playlist</p>
           <h1 className="section-title" style={{ marginBottom: "16px" }}>
             {playlist.title}
           </h1>

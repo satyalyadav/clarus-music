@@ -94,7 +94,6 @@ const GenreDetail: React.FC = () => {
         ← back to genres
       </button>
 
-      <p className="section-label">//genre</p>
       <h1 className="section-title" style={{ marginBottom: "16px" }}>
         {genre.name}
       </h1>

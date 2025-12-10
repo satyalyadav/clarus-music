@@ -88,7 +88,6 @@ const PlaylistEdit: React.FC = () => {
         ← back to playlist
       </button>
 
-      <p className="section-label">//library</p>
       <h1 className="section-title">edit playlist</h1>
 
       {error && (

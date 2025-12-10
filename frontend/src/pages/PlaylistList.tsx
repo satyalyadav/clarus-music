@@ -46,7 +46,6 @@ const PlaylistList: React.FC = () => {
 
   return (
     <div>
-      <p className="section-label">//library</p>
       <h1 className="section-title">playlists</h1>
 
       <div style={{ marginBottom: "24px" }}>

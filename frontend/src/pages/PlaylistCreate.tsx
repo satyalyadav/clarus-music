@@ -27,7 +27,6 @@ const PlaylistCreate: React.FC = () => {
 
   return (
     <div style={{ maxWidth: "500px" }}>
-      <p className="section-label">//library</p>
       <h1 className="section-title">create playlist</h1>
 
       {error && (

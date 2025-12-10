@@ -32,7 +32,6 @@ const Login: React.FC = () => {
 
   return (
     <div style={{ maxWidth: "400px", margin: "0 auto" }}>
-      <p className="section-label">//authentication</p>
       <h1 className="section-title">login</h1>
 
       {error && (

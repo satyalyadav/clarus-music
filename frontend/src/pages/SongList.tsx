@@ -73,7 +73,6 @@ const SongList: React.FC = () => {
 
   return (
     <div>
-      <p className="section-label">//library</p>
       <h1 className="section-title">songs</h1>
 
       <div style={{ display: "flex", gap: "12px", marginBottom: "24px" }}>

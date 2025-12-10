@@ -92,7 +92,6 @@ const SongEdit: React.FC = () => {
 
   return (
     <div style={{ maxWidth: "500px" }}>
-      <p className="section-label">//library</p>
       <h1 className="section-title">edit song</h1>
 
       {error && (

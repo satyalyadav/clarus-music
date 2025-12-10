@@ -33,7 +33,6 @@ const Register: React.FC = () => {
 
   return (
     <div style={{ maxWidth: "400px", margin: "0 auto" }}>
-      <p className="section-label">//authentication</p>
       <h1 className="section-title">register</h1>
 
       {error && (

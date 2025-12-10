@@ -57,7 +57,6 @@ const GenreList: React.FC = () => {
 
   return (
     <div>
-      <p className="section-label">//library</p>
       <h1 className="section-title">genres</h1>
 
       {genres.length === 0 ? (

@@ -31,7 +31,6 @@ const AlbumList: React.FC = () => {
 
   return (
     <div>
-      <p className="section-label">//library</p>
       <h1 className="section-title">albums</h1>
 
       {albums.length === 0 ? (

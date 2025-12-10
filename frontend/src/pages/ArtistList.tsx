@@ -29,7 +29,6 @@ const ArtistList: React.FC = () => {
 
   return (
     <div>
-      <p className="section-label">//library</p>
       <h1 className="section-title">artists</h1>
 
       {artists.length === 0 ? (

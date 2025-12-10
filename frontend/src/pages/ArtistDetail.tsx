@@ -109,7 +109,6 @@ const ArtistDetail: React.FC = () => {
           🎤
         </div>
         <div>
-          <p className="section-label">//artist</p>
           <h1 className="section-title" style={{ marginBottom: "16px" }}>
             {artist.name}
           </h1>

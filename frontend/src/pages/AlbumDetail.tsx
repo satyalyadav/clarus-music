@@ -126,7 +126,6 @@ const AlbumDetail: React.FC = () => {
           </div>
         )}
         <div>
-          <p className="section-label">//album</p>
           <h1 className="section-title" style={{ marginBottom: "16px" }}>
             {album.title}
           </h1>
