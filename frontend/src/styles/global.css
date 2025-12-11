@@ -159,6 +159,7 @@ body {
   flex: 1;
   padding: 24px;
   overflow-y: auto;
+  padding-bottom: 160px; /* leave room for fixed audio player */
 }
 
 /* Section headers */
@@ -276,6 +277,36 @@ body {
 
 .form-row .form-group {
   flex: 1;
+}
+
+.file-input-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.file-input-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.file-input-button input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.file-input-name {
+  font-size: 13px;
+  color: var(--text-muted);
+  min-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  max-width: 100%;
 }
 
 /* Lists */
@@ -404,13 +435,33 @@ body {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 16px 24px;
+  padding: 12px 20px;
   border-top: 1px solid var(--border-color);
   background: var(--card-bg);
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
 }
 
 .audio-player-info {
-  width: 180px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  width: 220px;
+}
+
+.audio-player-cover {
+  width: 42px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.audio-player-text {
   min-width: 0;
 }
 

@@ -97,12 +97,21 @@ const AudioPlayer: React.FC = () => {
   return (
     <div className="audio-player">
       <div className="audio-player-info">
-        <div className="audio-player-title">
-          {currentTrack.title || "Unknown"}
-        </div>
-        <div className="audio-player-subtitle">
-          {currentTrack.artist || "Unknown Artist"}
-          {currentTrack.album && ` • ${currentTrack.album}`}
+        {currentTrack.cover && (
+          <img
+            src={currentTrack.cover}
+            alt={currentTrack.title || "cover art"}
+            className="audio-player-cover"
+          />
+        )}
+        <div className="audio-player-text">
+          <div className="audio-player-title">
+            {currentTrack.title || "Unknown"}
+          </div>
+          <div className="audio-player-subtitle">
+            {currentTrack.artist || "Unknown Artist"}
+            {currentTrack.album && ` • ${currentTrack.album}`}
+          </div>
         </div>
       </div>
 

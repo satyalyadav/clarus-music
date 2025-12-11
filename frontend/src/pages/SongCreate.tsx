@@ -235,56 +235,63 @@ const SongCreate: React.FC = () => {
       <form onSubmit={handleSubmit}>
         <div className="form-group">
           <label className="form-label">//audio file</label>
-          <input
-            type="file"
-            className="form-input"
-            accept="audio/*"
-            onChange={async (e) => {
-              const selectedFile = e.target.files?.[0] || null;
-              setFile(selectedFile);
+          <div className="file-input-row">
+            <label className="btn btn-primary file-input-button">
+              choose file
+              <input
+                type="file"
+                accept="audio/*"
+                onChange={async (e) => {
+                  const selectedFile = e.target.files?.[0] || null;
+                  setFile(selectedFile);
 
-              // Extract duration from audio file
-              if (selectedFile) {
-                try {
-                  const audio = new Audio();
-                  const objectUrl = URL.createObjectURL(selectedFile);
-                  audio.src = objectUrl;
+                  // Extract duration from audio file
+                  if (selectedFile) {
+                    try {
+                      const audio = new Audio();
+                      const objectUrl = URL.createObjectURL(selectedFile);
+                      audio.src = objectUrl;
 
-                  await new Promise((resolve, reject) => {
-                    audio.addEventListener("loadedmetadata", () => {
-                      const durationSeconds = Math.floor(audio.duration);
-                      const hours = Math.floor(durationSeconds / 3600);
-                      const minutes = Math.floor((durationSeconds % 3600) / 60);
-                      const seconds = durationSeconds % 60;
+                      await new Promise((resolve, reject) => {
+                        audio.addEventListener("loadedmetadata", () => {
+                          const durationSeconds = Math.floor(audio.duration);
+                          const hours = Math.floor(durationSeconds / 3600);
+                          const minutes = Math.floor((durationSeconds % 3600) / 60);
+                          const seconds = durationSeconds % 60;
 
-                      // Format as PostgreSQL interval: Always use HH:MM:SS format to avoid ambiguity
-                      // PostgreSQL interprets MM:SS as hours:minutes, so we use 00:MM:SS for songs under 1 hour
-                      const durationStr = `${String(hours).padStart(
-                        2,
-                        "0"
-                      )}:${String(minutes).padStart(2, "0")}:${String(
-                        seconds
-                      ).padStart(2, "0")}`;
+                          // Format as PostgreSQL interval: Always use HH:MM:SS format to avoid ambiguity
+                          // PostgreSQL interprets MM:SS as hours:minutes, so we use 00:MM:SS for songs under 1 hour
+                          const durationStr = `${String(hours).padStart(
+                            2,
+                            "0"
+                          )}:${String(minutes).padStart(2, "0")}:${String(
+                            seconds
+                          ).padStart(2, "0")}`;
 
-                      setDuration(durationStr);
-                      URL.revokeObjectURL(objectUrl);
-                      resolve(null);
-                    });
-                    audio.addEventListener("error", reject);
-                  });
-                } catch (err) {
-                  console.error("Error extracting duration:", err);
-                  setDuration("");
-                  setError(
-                    "Failed to extract duration from audio file. Please try another file."
-                  );
-                }
-              } else {
-                setDuration("");
-              }
-            }}
-            required
-          />
+                          setDuration(durationStr);
+                          URL.revokeObjectURL(objectUrl);
+                          resolve(null);
+                        });
+                        audio.addEventListener("error", reject);
+                      });
+                    } catch (err) {
+                      console.error("Error extracting duration:", err);
+                      setDuration("");
+                      setError(
+                        "Failed to extract duration from audio file. Please try another file."
+                      );
+                    }
+                  } else {
+                    setDuration("");
+                  }
+                }}
+                required
+              />
+            </label>
+            <div className="file-input-name">
+              {file ? file.name : "no file selected"}
+            </div>
+          </div>
           {duration && (
             <div style={{ marginTop: "4px", fontSize: "0.9em", color: "#666" }}>
               Duration: {duration}

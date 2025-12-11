@@ -9,6 +9,7 @@ interface Song {
   duration: any;
   file_path: string;
   artist_name?: string;
+  cover_image?: string;
 }
 
 interface Album {
@@ -61,6 +62,7 @@ const AlbumDetail: React.FC = () => {
       title: s.title,
       artist: s.artist_name || "",
       album: album.title,
+      cover: s.cover_image || album.cover_image || "",
     }));
     setQueue(tracks);
     playTrack(tracks[0]);
@@ -73,6 +75,7 @@ const AlbumDetail: React.FC = () => {
       title: s.title,
       artist: s.artist_name || "",
       album: album.title,
+      cover: s.cover_image || album.cover_image || "",
     }));
     setQueue(tracks);
     playTrack({
@@ -80,6 +83,7 @@ const AlbumDetail: React.FC = () => {
       title: song.title,
       artist: song.artist_name || "",
       album: album.title,
+      cover: song.cover_image || album.cover_image || "",
     });
   };
 

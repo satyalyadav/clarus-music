@@ -93,6 +93,7 @@ const SongList: React.FC = () => {
       title: s.title,
       artist: s.artist_name || "",
       album: s.album_title || "",
+      cover: s.cover_image || "",
     }));
     setQueue(tracks);
     playTrack(tracks[0]);
@@ -104,6 +105,7 @@ const SongList: React.FC = () => {
       title: s.title,
       artist: s.artist_name || "",
       album: s.album_title || "",
+      cover: s.cover_image || "",
     }));
     setQueue(tracks);
     playTrack({
@@ -111,6 +113,7 @@ const SongList: React.FC = () => {
       title: song.title,
       artist: song.artist_name || "",
       album: song.album_title || "",
+      cover: song.cover_image || "",
     });
   };
 
