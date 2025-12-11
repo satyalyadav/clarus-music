@@ -38,6 +38,7 @@ const genreRoutes = require('./routes/genreRoutes');
 const albumRoutes = require('./routes/albumRoutes');
 const songRoutes = require('./routes/songRoutes');
 const playlistRoutes = require('./routes/playlistRoutes');
+const metadataRoutes = require('./routes/metadataRoutes');
 
 // 5) Import error handler
 const errorHandler = require('./middleware/errorHandler');
@@ -60,10 +61,13 @@ app.use('/songs', upload.single('audio'), songRoutes);
 
 app.use('/playlists', playlistRoutes);
 
-// 10) Global error handler (must come last)
+// 10) Metadata search endpoint
+app.use('/api/metadata', metadataRoutes);
+
+// 11) Global error handler (must come last)
 app.use(errorHandler);
 
-// 11) Start server
+// 12) Start server
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
