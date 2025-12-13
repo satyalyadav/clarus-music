@@ -10,5 +10,5 @@
   },
   "keywords": ["music", "library", "local-first", "indexeddb", "pwa"],
   "author": "",
-  "license": "ISC"
+  "license": "MIT"
 }

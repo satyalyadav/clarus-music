@@ -1,26 +1,18 @@
 # Music Library
 
 A **local-first** music library application that works entirely in your browser.  
-Built with React, TypeScript, and IndexedDB. No backend required!
-
-## Features
-
-- 🎵 **100% Local Storage** - All your music and metadata stored in your browser
-- 🚀 **Zero Backend Costs** - No server, no database, no file storage needed
-- 📱 **Works Offline** - Full functionality without internet connection
-- 🎨 **Modern UI** - Clean, responsive interface
-- 🎧 **Audio Player** - Built-in player with queue support
-- 📚 **Organize Music** - Songs, Albums, Artists, Genres, and Playlists
+Built with React, TypeScript, and IndexedDB. It originally started as a class project for a database course, used PostgreSQL, and had a Express.js backend. But I decided to make it local first and deploy it.
 
 ## How It Works
 
 This app uses **IndexedDB** (via Dexie.js) to store:
+
 - Audio files as Blobs
 - Song metadata (title, artist, album, genre, duration)
 - Playlists and their song associations
 - All other library data
 
-Everything is stored locally in your browser. Your music library is tied to the browser/device you use, but there are **zero hosting costs** and it works completely offline.
+Everything is stored locally in your browser. Your music library is tied to the browser/device you use.
 
 ## Prerequisites
 
@@ -65,25 +57,9 @@ Everything is stored locally in your browser. Your music library is tied to the 
 npm run build
 ```
 
-This creates an optimized production build in `frontend/dist/` that can be deployed to:
-- **Vercel** (recommended - free static hosting)
-- **Netlify**
-- **GitHub Pages**
-- Any static file hosting service
-
-## Deployment to Vercel
-
-1. Push your code to GitHub
-2. Import the project in Vercel
-3. Set build command: `cd frontend && npm run build`
-4. Set output directory: `frontend/dist`
-5. Deploy!
-
-**That's it!** Zero backend costs, zero database costs, zero file storage costs.
-
 ## Technical Details
 
-- **Frontend Framework**: React 19 with TypeScript
+- **Frontend Framework**: React with TypeScript
 - **Database**: IndexedDB (via Dexie.js)
 - **Build Tool**: Vite
 - **Routing**: React Router
@@ -92,11 +68,13 @@ This creates an optimized production build in `frontend/dist/` that can be deplo
 ## Browser Compatibility
 
 Works in all modern browsers that support:
+
 - IndexedDB
 - File API
 - Audio API
 
 Tested and working in:
+
 - Chrome/Edge (latest)
 - Firefox (latest)
 - Safari (latest)
@@ -109,4 +87,4 @@ Tested and working in:
 
 ## License
 
-ISC
+MIT License - see [LICENSE](LICENSE) file for details.
