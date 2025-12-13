@@ -112,79 +112,123 @@ const SongList: React.FC = () => {
 
   const handlePlayAll = async () => {
     if (songs.length === 0) return;
-    const tracks = await Promise.all(
-      songs.map(async (s) => {
-        const url = s.song_id ? songUrls.get(s.song_id) : null;
-        if (!url && s.song_id) {
-          // Create URL if not already created
-          const newUrl = await getSongUrl(s);
-          setSongUrls(prev => new Map(prev).set(s.song_id!, newUrl));
-          return {
-            url: newUrl,
-            title: s.title,
-            artist: s.artist_name || "",
-            album: s.album_title || "",
-            cover: s.cover_image || "",
-          };
-        }
-        return {
-          url: url || "",
-          title: s.title,
-          artist: s.artist_name || "",
-          album: s.album_title || "",
-          cover: s.cover_image || "",
-        };
-      })
-    );
-    setQueue(tracks);
-    if (tracks[0]) playTrack(tracks[0]);
+    try {
+      const tracks = await Promise.all(
+        songs.map(async (s) => {
+          try {
+            const url = s.song_id ? songUrls.get(s.song_id) : null;
+            if (!url && s.song_id) {
+              // Create URL if not already created
+              const newUrl = await getSongUrl(s);
+              setSongUrls(prev => new Map(prev).set(s.song_id!, newUrl));
+              return {
+                url: newUrl,
+                title: s.title,
+                artist: s.artist_name || "",
+                album: s.album_title || "",
+                cover: s.cover_image || "",
+              };
+            }
+            return {
+              url: url || "",
+              title: s.title,
+              artist: s.artist_name || "",
+              album: s.album_title || "",
+              cover: s.cover_image || "",
+            };
+          } catch (err) {
+            console.error(`Failed to get URL for song ${s.song_id}:`, err);
+            return {
+              url: "",
+              title: s.title,
+              artist: s.artist_name || "",
+              album: s.album_title || "",
+              cover: s.cover_image || "",
+            };
+          }
+        })
+      );
+      // Filter out tracks with no URL
+      const validTracks = tracks.filter(t => t.url);
+      if (validTracks.length === 0) {
+        alert('No playable songs found');
+        return;
+      }
+      setQueue(validTracks);
+      if (validTracks[0]) playTrack(validTracks[0]);
+    } catch (err) {
+      console.error('Error playing all songs:', err);
+      alert(`Failed to play songs: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
   };
 
   const handlePlaySong = async (song: Song) => {
-    const tracks = await Promise.all(
-      songs.map(async (s) => {
-        const url = s.song_id ? songUrls.get(s.song_id) : null;
-        if (!url && s.song_id) {
-          const newUrl = await getSongUrl(s);
-          setSongUrls(prev => new Map(prev).set(s.song_id!, newUrl));
-          return {
-            url: newUrl,
-            title: s.title,
-            artist: s.artist_name || "",
-            album: s.album_title || "",
-            cover: s.cover_image || "",
-          };
+    try {
+      const tracks = await Promise.all(
+        songs.map(async (s) => {
+          try {
+            const url = s.song_id ? songUrls.get(s.song_id) : null;
+            if (!url && s.song_id) {
+              const newUrl = await getSongUrl(s);
+              setSongUrls(prev => new Map(prev).set(s.song_id!, newUrl));
+              return {
+                url: newUrl,
+                title: s.title,
+                artist: s.artist_name || "",
+                album: s.album_title || "",
+                cover: s.cover_image || "",
+              };
+            }
+            return {
+              url: url || "",
+              title: s.title,
+              artist: s.artist_name || "",
+              album: s.album_title || "",
+              cover: s.cover_image || "",
+            };
+          } catch (err) {
+            console.error(`Failed to get URL for song ${s.song_id}:`, err);
+            return {
+              url: "",
+              title: s.title,
+              artist: s.artist_name || "",
+              album: s.album_title || "",
+              cover: s.cover_image || "",
+            };
+          }
+        })
+      );
+      setQueue(tracks);
+      
+      const songUrl = song.song_id ? songUrls.get(song.song_id) : null;
+      let finalUrl = songUrl;
+      
+      if (!songUrl && song.song_id) {
+        try {
+          finalUrl = await getSongUrl(song);
+          setSongUrls(prev => new Map(prev).set(song.song_id!, finalUrl));
+        } catch (err) {
+          console.error(`Failed to get URL for song ${song.song_id}:`, err);
+          alert(`Cannot play song: ${err instanceof Error ? err.message : 'Song file not available'}`);
+          return;
         }
-        return {
-          url: url || "",
-          title: s.title,
-          artist: s.artist_name || "",
-          album: s.album_title || "",
-          cover: s.cover_image || "",
-        };
-      })
-    );
-    setQueue(tracks);
-    
-    const songUrl = song.song_id ? songUrls.get(song.song_id) : null;
-    if (!songUrl && song.song_id) {
-      const newUrl = await getSongUrl(song);
-      setSongUrls(prev => new Map(prev).set(song.song_id!, newUrl));
+      }
+      
+      if (!finalUrl) {
+        alert('Cannot play song: Song file not available');
+        return;
+      }
+      
       playTrack({
-        url: newUrl,
+        url: finalUrl,
         title: song.title,
         artist: song.artist_name || "",
         album: song.album_title || "",
         cover: song.cover_image || "",
       });
-    } else {
-      playTrack({
-        url: songUrl || "",
-        title: song.title,
-        artist: song.artist_name || "",
-        album: song.album_title || "",
-        cover: song.cover_image || "",
-      });
+    } catch (err) {
+      console.error('Error playing song:', err);
+      alert(`Failed to play song: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
 

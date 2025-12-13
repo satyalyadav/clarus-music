@@ -49,18 +49,40 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
   const audioRef = useRef<HTMLAudioElement>(new Audio());
 
   const playTrack = (track: Track) => {
-    if (currentTrack?.url !== track.url) {
-      audioRef.current.src = track.url;
-      setCurrentTrack(track);
-
-      // Find index in queue
-      const idx = queue.findIndex((t) => t.url === track.url);
-      if (idx !== -1) {
-        setCurrentIndex(idx);
+    try {
+      if (!track.url) {
+        console.error('Cannot play track: no URL provided');
+        return;
       }
+      
+      if (currentTrack?.url !== track.url) {
+        audioRef.current.src = track.url;
+        setCurrentTrack(track);
+
+        // Find index in queue
+        const idx = queue.findIndex((t) => t.url === track.url);
+        if (idx !== -1) {
+          setCurrentIndex(idx);
+        }
+      }
+      
+      const playPromise = audioRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            setIsPlaying(true);
+          })
+          .catch((error) => {
+            console.error('Error playing audio:', error);
+            setIsPlaying(false);
+          });
+      } else {
+        setIsPlaying(true);
+      }
+    } catch (error) {
+      console.error('Error in playTrack:', error);
+      setIsPlaying(false);
     }
-    audioRef.current.play();
-    setIsPlaying(true);
   };
 
   const togglePlayPause = () => {

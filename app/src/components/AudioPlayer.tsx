@@ -29,6 +29,9 @@ const AudioPlayer: React.FC = () => {
   const [prevVolume, setPrevVolume] = useState(1);
   const [shouldScroll, setShouldScroll] = useState(false);
   const [scrollDistance, setScrollDistance] = useState(0);
+  const [dragTime, setDragTime] = useState<number | null>(null);
+  const dragTimeRef = useRef<number | null>(null);
+  const hasMovedRef = useRef(false);
 
   const toggleMute = () => {
     if (volume > 0) {
@@ -40,42 +43,104 @@ const AudioPlayer: React.FC = () => {
   };
 
   const calculateSeekPosition = useCallback(
-    (clientX: number) => {
-      if (!sliderRef.current || duration <= 0) return;
+    (clientX: number, shouldPreview: boolean = false) => {
+      if (!sliderRef.current || duration <= 0) return 0;
       const rect = sliderRef.current.getBoundingClientRect();
       const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
       const percentage = x / rect.width;
-      seek(percentage * duration);
+      const targetTime = percentage * duration;
+
+      if (shouldPreview) {
+        dragTimeRef.current = targetTime;
+        setDragTime(targetTime);
+      }
+
+      return targetTime;
     },
-    [duration, seek]
+    [duration]
   );
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    setIsDragging(true);
-    calculateSeekPosition(e.clientX);
-  };
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (isDragging) {
-        calculateSeekPosition(e.clientX);
-      }
-    };
-
-    const handleMouseUp = () => {
-      setIsDragging(false);
-    };
-
-    if (isDragging) {
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (
+      (e.pointerType === "mouse" && e.button !== 0) ||
+      duration <= 0 ||
+      !sliderRef.current
+    ) {
+      return;
     }
 
+    e.preventDefault();
+    sliderRef.current.setPointerCapture(e.pointerId);
+
+    setIsDragging(true);
+    hasMovedRef.current = false;
+    // Don't mute yet - only mute if the pointer actually moves
+
+    calculateSeekPosition(e.clientX, true);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging) return;
+    
+    // Only mute on first movement (actual dragging, not just a click)
+    if (!hasMovedRef.current) {
+      hasMovedRef.current = true;
+      setPrevVolume(volume);
+      setVolume(0);
+    }
+    
+    calculateSeekPosition(e.clientX, true);
+  };
+
+  const endDrag = useCallback(
+    (clientX: number) => {
+      const finalTime =
+        dragTimeRef.current !== null
+          ? dragTimeRef.current
+          : calculateSeekPosition(clientX, false);
+
+      seek(finalTime);
+      setDragTime(null);
+      dragTimeRef.current = null;
+      setIsDragging(false);
+      
+      // Only restore volume if we actually muted (i.e., if there was movement)
+      if (hasMovedRef.current) {
+        setVolume(prevVolume);
+        hasMovedRef.current = false;
+      }
+    },
+    [calculateSeekPosition, prevVolume, seek, setVolume]
+  );
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging) return;
+
+    if (sliderRef.current?.hasPointerCapture?.(e.pointerId)) {
+      sliderRef.current.releasePointerCapture(e.pointerId);
+    }
+
+    endDrag(e.clientX);
+  };
+
+  const handlePointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging) return;
+
+    if (sliderRef.current?.hasPointerCapture?.(e.pointerId)) {
+      sliderRef.current.releasePointerCapture(e.pointerId);
+    }
+
+    endDrag(e.clientX);
+  };
+
+  // If the component unmounts mid-drag, restore the volume mute change
+  useEffect(() => {
     return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
+      if (isDragging && hasMovedRef.current) {
+        setVolume(prevVolume);
+      }
     };
-  }, [isDragging, calculateSeekPosition]);
+  }, [isDragging, prevVolume, setVolume]);
 
   // Check if title text overflows and calculate scroll distance
   useEffect(() => {
@@ -119,8 +184,12 @@ const AudioPlayer: React.FC = () => {
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setVolume(parseFloat(e.target.value));
   };
-
-  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+  
+  // Show drag preview while scrubbing, otherwise mirror the playing time
+  const displayTime = isDragging
+    ? (dragTimeRef.current ?? dragTime ?? currentTime)
+    : currentTime;
+  const progress = duration > 0 ? (displayTime / duration) * 100 : 0;
 
   return (
     <div className="audio-player">
@@ -180,11 +249,14 @@ const AudioPlayer: React.FC = () => {
         </div>
 
         <div className="audio-player-progress">
-          <span className="audio-player-time">{formatTime(currentTime)}</span>
+          <span className="audio-player-time">{formatTime(displayTime)}</span>
           <div
             ref={sliderRef}
             className="audio-player-slider"
-            onMouseDown={handleMouseDown}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerCancel}
           >
             <div
               className="audio-player-slider-fill"
