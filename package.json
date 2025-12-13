@@ -1,25 +1,14 @@
 {
   "name": "music-library",
   "version": "1.0.0",
-  "description": "Root for Music Library backend and frontend",
-  "main": "index.js",
+  "description": "Local-first music library app - works entirely in the browser",
   "scripts": {
-    "install:backend": "cd backend && npm install",
-    "install:frontend": "cd frontend && npm install",
-    "install:all": "npm install && npm run install:backend && npm run install:frontend",
-    "dev:backend": "cd backend && npm run dev",
-    "dev:frontend": "cd frontend && npm run dev",
-    "dev": "docker-compose up -d && concurrently \"npm:dev:backend\" \"npm:dev:frontend\"",
-    "db:up": "docker-compose up -d",
-    "db:down": "docker-compose down",
-    "db:reset": "docker-compose down -v && docker-compose up -d",
-    "db:logs": "docker-compose logs -f postgres"
+    "install": "cd frontend && npm install",
+    "dev": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "preview": "cd frontend && npm run preview"
   },
-  "keywords": [],
+  "keywords": ["music", "library", "local-first", "indexeddb", "pwa"],
   "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "devDependencies": {
-    "concurrently": "^9.1.2"
-  }
+  "license": "ISC"
 }

@@ -12,10 +12,7 @@ interface User {
 }
 
 interface AuthContextType {
-  user: User | null;
-  loading: boolean;
-  login: (username: string, password: string) => Promise<void>;
-  logout: () => void;
+  user: User;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -30,30 +27,8 @@ const LOCAL_USER: User = {
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    // For local-first app, always set user immediately
-    // No authentication required
-    setUser(LOCAL_USER);
-    setLoading(false);
-  }, []);
-
-  const login = async (username: string, password: string) => {
-    // For local-first app, just set the local user
-    // In the future, you could add optional password protection
-    setUser(LOCAL_USER);
-  };
-
-  const logout = () => {
-    // For local-first app, logout doesn't really do anything
-    // but we keep it for UI consistency
-    setUser(null);
-  };
-
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user: LOCAL_USER }}>
       {children}
     </AuthContext.Provider>
   );

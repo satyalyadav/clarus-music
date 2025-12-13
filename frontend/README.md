@@ -1,115 +1,93 @@
-# Music Library - New Frontend
+# Music Library Frontend
 
-A modern, beautiful frontend for the Music Library app inspired by developer portfolio aesthetics.
+A local-first music library application built with React, TypeScript, and IndexedDB.
 
 ## Features
 
-- 🎨 **Beautiful Design** - Monospace font, clean card-based layout with gradient backgrounds
-- 🌙 **Dark/Light Mode** - Toggle between themes with automatic system preference detection
-- 🎵 **Audio Player** - Built-in audio player with queue management, next/previous controls
-- 📱 **Responsive** - Works great on desktop and mobile devices
-- ⚡ **Fast** - Built with Vite and React 19
-
-## Design Inspiration
-
-The design follows a developer portfolio aesthetic with:
-
-- Monospace font (JetBrains Mono)
-- `//section` style labels
-- `<Component/>` style titles
-- Clean, minimal card container
-- Purple/pink gradient background
-- Smooth theme transitions
+- 🎵 **100% Browser-Based** - All data stored locally in IndexedDB
+- 🚀 **No Backend Required** - Works entirely in the browser
+- 📱 **Works Offline** - Full functionality without internet
+- 🎨 **Modern UI** - Clean, responsive design with dark/light themes
+- 🎧 **Audio Player** - Built-in player with queue management
 
 ## Getting Started
 
 1. **Install dependencies:**
 
    ```bash
-   cd frontend-new
    npm install
    ```
 
-2. **Create environment file:**
-
-   ```bash
-   echo "VITE_API_URL=http://localhost:4000" > .env
-   ```
-
-3. **Start the development server:**
+2. **Start the development server:**
 
    ```bash
    npm run dev
    ```
 
-4. **Open in browser:**
-   Navigate to [http://localhost:5174](http://localhost:5174)
+3. **Open in browser:**
+   Navigate to the URL shown (typically `http://localhost:5173`)
 
 ## Project Structure
 
 ```
-frontend-new/
-├── public/
-│   └── music-icon.svg       # App icon
+frontend/
+├── public/              # Static assets
 ├── src/
-│   ├── api/
-│   │   └── axios.ts         # API client with auth interceptor
-│   ├── components/
-│   │   ├── AudioPlayer.tsx  # Global audio player
-│   │   ├── Layout.tsx       # Main layout with navigation
-│   │   └── PrivateRoute.tsx # Auth protection wrapper
-│   ├── contexts/
-│   │   ├── AudioPlayerContext.tsx  # Audio playback state
-│   │   ├── AuthContext.tsx         # User authentication
-│   │   └── ThemeContext.tsx        # Light/dark theme
-│   ├── pages/
-│   │   ├── Login.tsx / Register.tsx
+│   ├── components/      # React components
+│   │   ├── AudioPlayer.tsx
+│   │   └── Layout.tsx
+│   ├── contexts/        # React contexts
+│   │   ├── AudioPlayerContext.tsx
+│   │   ├── AuthContext.tsx
+│   │   └── ThemeContext.tsx
+│   ├── hooks/           # Custom hooks
+│   │   └── useSongUrls.ts
+│   ├── pages/           # Page components
 │   │   ├── SongList.tsx / SongCreate.tsx / SongEdit.tsx
 │   │   ├── AlbumList.tsx / AlbumDetail.tsx
 │   │   ├── ArtistList.tsx / ArtistDetail.tsx
 │   │   ├── GenreList.tsx / GenreDetail.tsx
 │   │   └── PlaylistList.tsx / PlaylistCreate.tsx / PlaylistDetail.tsx / PlaylistEdit.tsx
+│   ├── services/        # Data services
+│   │   └── db.ts        # IndexedDB service layer
 │   ├── styles/
-│   │   └── global.css       # Global styles and CSS variables
-│   ├── App.tsx              # Main app with routing
-│   └── main.tsx             # Entry point
-└── vite.config.ts           # Vite configuration (port 5174)
+│   │   └── global.css   # Global styles
+│   ├── App.tsx          # Main app component
+│   └── main.tsx         # Entry point
+└── vite.config.ts       # Vite configuration
 ```
-
-## Replacing the Old Frontend
-
-When you're ready to replace the old frontend:
-
-1. Rename the old frontend folder:
-
-   ```bash
-   mv frontend frontend-old
-   ```
-
-2. Rename the new frontend folder:
-
-   ```bash
-   mv frontend-new frontend
-   ```
-
-3. Update `vite.config.ts` to use port 5173:
-
-   ```ts
-   server: {
-     port: 5173,
-   }
-   ```
-
-4. Run the app as usual:
-   ```bash
-   npm run dev
-   ```
 
 ## Tech Stack
 
 - **React 19** - UI library
 - **TypeScript** - Type safety
-- **Vite** - Build tool
-- **React Router 7** - Routing
-- **Axios** - HTTP client
-- **CSS Variables** - Theming
+- **Vite** - Build tool and dev server
+- **React Router 7** - Client-side routing
+- **Dexie.js** - IndexedDB wrapper
+- **CSS Variables** - Theming system
+
+## Building for Production
+
+```bash
+npm run build
+```
+
+This creates an optimized production build in `dist/` that can be deployed to any static hosting service.
+
+## Data Storage
+
+All data is stored in IndexedDB:
+- Songs (with audio file blobs)
+- Albums, Artists, Genres
+- Playlists and playlist-song relationships
+
+The database is automatically created and managed by Dexie.js. No configuration needed!
+
+## Browser Support
+
+Works in all modern browsers that support:
+- IndexedDB
+- File API
+- Audio API
+
+Tested in Chrome, Firefox, Safari, and Edge.

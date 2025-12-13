@@ -6,7 +6,6 @@ import React, {
   ReactNode,
   useEffect,
 } from "react";
-import { useAuth } from "./AuthContext";
 
 export interface Track {
   url: string;
@@ -40,7 +39,6 @@ const AudioPlayerContext = createContext<AudioPlayerContextProps | undefined>(
 export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
-  const { user } = useAuth();
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -130,19 +128,6 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
       audio.removeEventListener("ended", onEnded);
     };
   }, [currentIndex, queue]);
-
-  // When user logs out, stop playback
-  useEffect(() => {
-    if (!user) {
-      audioRef.current.pause();
-      setCurrentTrack(null);
-      setIsPlaying(false);
-      setCurrentTime(0);
-      setDuration(0);
-      setQueue([]);
-      setCurrentIndex(-1);
-    }
-  }, [user]);
 
   return (
     <AudioPlayerContext.Provider
