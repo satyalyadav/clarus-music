@@ -348,6 +348,7 @@ body {
   border: 1px solid var(--border-color);
   border-radius: 8px;
   transition: all 0.2s ease;
+  cursor: pointer;
 }
 
 .list-item:hover {

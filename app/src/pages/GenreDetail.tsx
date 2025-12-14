@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAudioPlayer } from "../contexts/AudioPlayerContext";
-import { genreService, songService, getSongUrl } from "../services/db";
+import { genreService, songService, artistService, albumService, getSongUrl } from "../services/db";
 import { SongWithRelations } from "../services/db";
 
 interface Genre {
@@ -150,20 +150,11 @@ const GenreDetail: React.FC = () => {
             const isCurrentPlaying = isCurrent && isPlaying;
 
             return (
-              <div key={song.song_id} className="list-item">
-                <button
-                  className={`btn btn-icon ${
-                    isCurrentPlaying ? "btn-primary" : ""
-                  }`}
-                  onClick={() =>
-                    isCurrent ? togglePlayPause() : handlePlaySong(song)
-                  }
-                  title={isCurrentPlaying ? "Pause" : "Play"}
-                >
-                  <span className="btn-icon-content">
-                    {isCurrentPlaying ? "⏸" : "▶"}
-                  </span>
-                </button>
+              <div 
+                key={song.song_id} 
+                className="list-item"
+                onClick={() => isCurrent ? togglePlayPause() : handlePlaySong(song)}
+              >
                 <div className="list-item-content">
                   <div
                     className={`list-item-title ${isCurrent ? "playing" : ""}`}

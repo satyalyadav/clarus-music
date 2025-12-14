@@ -161,20 +161,11 @@ const ArtistDetail: React.FC = () => {
             const isCurrentPlaying = isCurrent && isPlaying;
 
             return (
-              <div key={song.song_id} className="list-item">
-                <button
-                  className={`btn btn-icon ${
-                    isCurrentPlaying ? "btn-primary" : ""
-                  }`}
-                  onClick={() =>
-                    isCurrent ? togglePlayPause() : handlePlaySong(song)
-                  }
-                  title={isCurrentPlaying ? "Pause" : "Play"}
-                >
-                  <span className="btn-icon-content">
-                    {isCurrentPlaying ? "⏸" : "▶"}
-                  </span>
-                </button>
+              <div 
+                key={song.song_id} 
+                className="list-item"
+                onClick={() => isCurrent ? togglePlayPause() : handlePlaySong(song)}
+              >
                 <div className="list-item-content">
                   <div
                     className={`list-item-title ${isCurrent ? "playing" : ""}`}

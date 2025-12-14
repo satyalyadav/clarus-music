@@ -187,7 +187,11 @@ const AlbumDetail: React.FC = () => {
             const isCurrentPlaying = isCurrent && isPlaying;
 
             return (
-              <div key={song.song_id} className="list-item">
+              <div 
+                key={song.song_id} 
+                className="list-item"
+                onClick={() => isCurrent ? togglePlayPause() : handlePlaySong(song)}
+              >
                 <span
                   style={{
                     width: "24px",
@@ -197,19 +201,6 @@ const AlbumDetail: React.FC = () => {
                 >
                   {index + 1}
                 </span>
-                <button
-                  className={`btn btn-icon ${
-                    isCurrentPlaying ? "btn-primary" : ""
-                  }`}
-                  onClick={() =>
-                    isCurrent ? togglePlayPause() : handlePlaySong(song)
-                  }
-                  title={isCurrentPlaying ? "Pause" : "Play"}
-                >
-                  <span className="btn-icon-content">
-                    {isCurrentPlaying ? "⏸" : "▶"}
-                  </span>
-                </button>
                 <div className="list-item-content">
                   <div
                     className={`list-item-title ${isCurrent ? "playing" : ""}`}
