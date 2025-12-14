@@ -318,7 +318,7 @@ const SongCreate: React.FC = () => {
             </div>
           </div>
           {duration && (
-            <div style={{ marginTop: "4px", fontSize: "0.9em", color: "#666" }}>
+            <div style={{ marginTop: "4px", fontSize: "0.9em", color: "var(--text-muted)" }}>
               Duration: {duration}
             </div>
           )}
@@ -345,8 +345,8 @@ const SongCreate: React.FC = () => {
                 top: "100%",
                 left: 0,
                 right: 0,
-                backgroundColor: "white",
-                border: "1px solid #ccc",
+                backgroundColor: "var(--card-bg)",
+                border: "1px solid var(--border-color)",
                 borderRadius: "4px",
                 maxHeight: "300px",
                 overflowY: "auto",
@@ -356,7 +356,7 @@ const SongCreate: React.FC = () => {
               }}
             >
               {searchLoading && (
-                <div style={{ padding: "12px", textAlign: "center" }}>
+                <div style={{ padding: "12px", textAlign: "center", color: "var(--text-primary)" }}>
                   searching...
                 </div>
               )}
@@ -368,16 +368,17 @@ const SongCreate: React.FC = () => {
                     style={{
                       padding: "12px",
                       cursor: "pointer",
-                      borderBottom: "1px solid #eee",
+                      borderBottom: "1px solid var(--border-color)",
                       display: "flex",
                       alignItems: "center",
                       gap: "12px",
+                      backgroundColor: "var(--card-bg)",
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = "#f5f5f5";
+                      e.currentTarget.style.backgroundColor = "var(--button-hover)";
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = "white";
+                      e.currentTarget.style.backgroundColor = "var(--card-bg)";
                     }}
                   >
                     {result.coverArt && (
@@ -393,15 +394,15 @@ const SongCreate: React.FC = () => {
                       />
                     )}
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: "bold" }}>
+                      <div style={{ fontWeight: "bold", color: "var(--text-primary)" }}>
                         {result.title || "Unknown"}
                       </div>
-                      <div style={{ fontSize: "0.9em", color: "#666" }}>
+                      <div style={{ fontSize: "0.9em", color: "var(--text-secondary)" }}>
                         {result.artist || "Unknown Artist"}
                         {result.album && ` • ${result.album}`}
                       </div>
                       {result.genre && (
-                        <div style={{ fontSize: "0.8em", color: "#999" }}>
+                        <div style={{ fontSize: "0.8em", color: "var(--text-muted)" }}>
                           {result.genre}
                         </div>
                       )}

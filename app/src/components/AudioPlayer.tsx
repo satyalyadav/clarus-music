@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
-import { useAudioPlayer } from "../contexts/AudioPlayerContext";
+import { useAudioPlayer } from "../hooks/useAudioPlayer";
 
 function formatTime(seconds: number): string {
   if (isNaN(seconds)) return "0:00";

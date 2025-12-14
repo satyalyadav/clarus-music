@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useAudioPlayer } from "../contexts/AudioPlayerContext";
+import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { genreService, songService, artistService, albumService, getSongUrl } from "../services/db";
 import { SongWithRelations } from "../services/db";
 

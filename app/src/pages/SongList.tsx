@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAudioPlayer } from "../contexts/AudioPlayerContext";
+import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { getSongsWithRelations, getSongUrl, revokeSongUrl } from "../services/db";
 
 interface Song {
@@ -127,6 +127,7 @@ const SongList: React.FC = () => {
                 artist: s.artist_name || "",
                 album: s.album_title || "",
                 cover: s.cover_image || "",
+                songId: s.song_id,
               };
             }
             return {
@@ -135,6 +136,7 @@ const SongList: React.FC = () => {
               artist: s.artist_name || "",
               album: s.album_title || "",
               cover: s.cover_image || "",
+              songId: s.song_id,
             };
           } catch (err) {
             console.error(`Failed to get URL for song ${s.song_id}:`, err);
@@ -144,6 +146,7 @@ const SongList: React.FC = () => {
               artist: s.artist_name || "",
               album: s.album_title || "",
               cover: s.cover_image || "",
+              songId: s.song_id,
             };
           }
         })
@@ -177,6 +180,7 @@ const SongList: React.FC = () => {
                 artist: s.artist_name || "",
                 album: s.album_title || "",
                 cover: s.cover_image || "",
+                songId: s.song_id,
               };
             }
             return {
@@ -185,6 +189,7 @@ const SongList: React.FC = () => {
               artist: s.artist_name || "",
               album: s.album_title || "",
               cover: s.cover_image || "",
+              songId: s.song_id,
             };
           } catch (err) {
             console.error(`Failed to get URL for song ${s.song_id}:`, err);
@@ -194,6 +199,7 @@ const SongList: React.FC = () => {
               artist: s.artist_name || "",
               album: s.album_title || "",
               cover: s.cover_image || "",
+              songId: s.song_id,
             };
           }
         })
@@ -225,6 +231,7 @@ const SongList: React.FC = () => {
         artist: song.artist_name || "",
         album: song.album_title || "",
         cover: song.cover_image || "",
+        songId: song.song_id,
       });
     } catch (err) {
       console.error('Error playing song:', err);
@@ -267,8 +274,9 @@ const SongList: React.FC = () => {
       ) : (
         <div className="list">
           {songs.map((song) => {
-            const trackUrl = song.song_id ? songUrls.get(song.song_id) : null;
-            const isCurrent = trackUrl && currentTrack?.url === trackUrl;
+            // Use songId for reliable matching, fallback to URL matching
+            const isCurrent = (song.song_id && currentTrack?.songId === song.song_id) ||
+                             (song.song_id && songUrls.get(song.song_id) && currentTrack?.url === songUrls.get(song.song_id));
             const isCurrentPlaying = isCurrent && isPlaying;
 
             return (

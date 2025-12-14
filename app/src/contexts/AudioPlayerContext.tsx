@@ -13,6 +13,7 @@ export interface Track {
   artist?: string;
   album?: string;
   cover?: string;
+  songId?: number;
 }
 
 interface AudioPlayerContextProps {
@@ -32,7 +33,7 @@ interface AudioPlayerContextProps {
   addToQueue: (track: Track) => void;
 }
 
-const AudioPlayerContext = createContext<AudioPlayerContextProps | undefined>(
+export const AudioPlayerContext = createContext<AudioPlayerContextProps | undefined>(
   undefined
 );
 
@@ -175,9 +176,3 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
   );
 };
 
-export const useAudioPlayer = () => {
-  const ctx = useContext(AudioPlayerContext);
-  if (!ctx)
-    throw new Error("useAudioPlayer must be used within AudioPlayerProvider");
-  return ctx;
-};
