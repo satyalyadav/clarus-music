@@ -131,33 +131,31 @@ const AlbumDetail: React.FC = () => {
       </button>
 
       <div style={{ display: "flex", gap: "24px", marginBottom: "32px" }}>
-        {album.cover_image ? (
-          <img
-            src={album.cover_image}
-            alt={album.title}
-            style={{
-              width: "200px",
-              height: "200px",
-              objectFit: "cover",
-              borderRadius: "8px",
-            }}
-          />
-        ) : (
-          <div
-            style={{
-              width: "200px",
-              height: "200px",
-              background: "var(--card-bg)",
-              borderRadius: "8px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: "80px",
-            }}
-          >
-            💿
-          </div>
-        )}
+        {(() => {
+          const coverImage = album.cover_image || 
+            (album.songs.length > 0 ? album.songs.find(s => s.cover_image)?.cover_image : null);
+          return coverImage ? (
+            <img
+              src={coverImage}
+              alt={album.title}
+              style={{
+                width: "200px",
+                height: "200px",
+                objectFit: "cover",
+                borderRadius: "8px",
+              }}
+            />
+          ) : (
+            <div
+              style={{
+                width: "200px",
+                height: "200px",
+                background: "var(--card-bg)",
+                borderRadius: "8px",
+              }}
+            />
+          );
+        })()}
         <div>
           <h1 className="section-title" style={{ marginBottom: "16px" }}>
             {album.title}

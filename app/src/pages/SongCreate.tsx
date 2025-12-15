@@ -90,14 +90,25 @@ const SongCreate: React.FC = () => {
           throw new Error(`iTunes API error: ${response.statusText}`);
         }
         const data = await response.json();
-        const results: SearchResult[] = (data.results || []).map((item: any) => ({
-          title: item.trackName || '',
-          album: item.collectionName || '',
-          artist: item.artistName || '',
-          genre: item.primaryGenreName || '',
-          coverArt: item.artworkUrl100 || item.artworkUrl60 || '',
-          raw: item,
-        }));
+        const results: SearchResult[] = (data.results || []).map((item: any) => {
+          // Get maximum quality artwork by replacing size in URL
+          const getHighQualityArtwork = (url: string | undefined): string => {
+            if (!url) return '';
+            // Replace size parameters to get maximum quality (1200x1200)
+            // iTunes URLs format: .../source/100x100bb.jpg or .../source/60x60bb.png
+            return url.replace(/\/\d+x\d+bb\.(jpg|png)$/i, '/1200x1200bb.$1');
+          };
+          
+          return {
+            title: item.trackName || '',
+            album: item.collectionName || '',
+            artist: item.artistName || '',
+            genre: item.primaryGenreName || '',
+            coverArt: getHighQualityArtwork(item.artworkUrl100) || 
+                     getHighQualityArtwork(item.artworkUrl60) || '',
+            raw: item,
+          };
+        });
         setSearchResults(results);
         setShowResults(true);
       } catch (err: any) {

@@ -98,9 +98,52 @@ export const songService = {
   },
 
   async delete(id: number): Promise<void> {
-    // Also remove from playlists
+    // Get the song first to check for cascade deletion
+    const song = await db.songs.get(id);
+    if (!song) return;
+
+    const artistId = song.artist_id;
+    const albumId = song.album_id;
+    const genreId = song.genre_id;
+
+    // Remove from playlists and delete the song
     await db.playlistSongs.where('song_id').equals(id).delete();
     await db.songs.delete(id);
+
+    // Cascade delete: Check if artist, album, or genre should be deleted
+    // (only if no other songs reference them)
+
+    // Check and delete artist if no songs remain
+    if (artistId) {
+      const remainingSongsForArtist = await db.songs.where('artist_id').equals(artistId).count();
+      if (remainingSongsForArtist === 0) {
+        // Delete albums by this artist first (they won't have songs anymore)
+        const albums = await db.albums.where('artist_id').equals(artistId).toArray();
+        for (const album of albums) {
+          if (album.album_id) {
+            await db.albums.delete(album.album_id);
+          }
+        }
+        // Delete the artist
+        await db.artists.delete(artistId);
+      }
+    }
+
+    // Check and delete album if no songs remain
+    if (albumId) {
+      const remainingSongsForAlbum = await db.songs.where('album_id').equals(albumId).count();
+      if (remainingSongsForAlbum === 0) {
+        await db.albums.delete(albumId);
+      }
+    }
+
+    // Check and delete genre if no songs remain
+    if (genreId) {
+      const remainingSongsForGenre = await db.songs.where('genre_id').equals(genreId).count();
+      if (remainingSongsForGenre === 0) {
+        await db.genres.delete(genreId);
+      }
+    }
   },
 
   async getByArtist(artistId: number): Promise<Song[]> {

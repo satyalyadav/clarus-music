@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { albumService } from "../services/db";
+import { albumService, songService } from "../services/db";
 
 interface Album {
   album_id?: number;
@@ -8,21 +8,48 @@ interface Album {
   cover_image?: string | null;
 }
 
+interface AlbumWithCover extends Album {
+  displayCover?: string | null;
+}
+
 const AlbumList: React.FC = () => {
   const navigate = useNavigate();
-  const [albums, setAlbums] = useState<Album[]>([]);
+  const [albums, setAlbums] = useState<AlbumWithCover[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    albumService
-      .getAll()
-      .then((albums) => {
-        setAlbums(albums);
+    const loadAlbums = async () => {
+      try {
+        const [albumsData, songsData] = await Promise.all([
+          albumService.getAll(),
+          songService.getAll(),
+        ]);
+
+        // Create a map of album_id to first song with cover_image
+        const albumCoverMap = new Map<number, string>();
+        for (const song of songsData) {
+          if (song.album_id && song.cover_image && !albumCoverMap.has(song.album_id)) {
+            albumCoverMap.set(song.album_id, song.cover_image);
+          }
+        }
+
+        // Enrich albums with cover images from songs if album doesn't have one
+        const albumsWithCovers: AlbumWithCover[] = albumsData.map(album => ({
+          ...album,
+          displayCover: album.cover_image || (album.album_id ? albumCoverMap.get(album.album_id) : null),
+        }));
+
+        setAlbums(albumsWithCovers);
         setError(null);
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadAlbums();
   }, []);
 
   if (loading) return <div className="loading">Loading albums...</div>;
@@ -44,9 +71,9 @@ const AlbumList: React.FC = () => {
               className="grid-item"
               onClick={() => navigate(`/albums/${album.album_id}`)}
             >
-              {album.cover_image ? (
+              {album.displayCover ? (
                 <img
-                  src={album.cover_image}
+                  src={album.displayCover}
                   alt={album.title}
                   className="grid-item-image"
                 />
@@ -54,14 +81,12 @@ const AlbumList: React.FC = () => {
                 <div
                   className="grid-item-image"
                   style={{
+                    backgroundColor: "var(--card-bg)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    fontSize: "48px",
                   }}
-                >
-                  💿
-                </div>
+                />
               )}
               <div className="grid-item-content">
                 <div className="grid-item-title">{album.title}</div>
