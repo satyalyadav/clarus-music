@@ -1,26 +1,14 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { 
-  songService, 
-  albumService, 
-  artistService, 
-  genreService 
+import {
+  songService,
+  albumService,
+  artistService,
+  genreService,
+  Album,
+  Artist,
+  Genre,
 } from "../services/db";
-
-interface Album {
-  album_id: number;
-  title: string;
-}
-
-interface Artist {
-  artist_id: number;
-  name: string;
-}
-
-interface Genre {
-  genre_id: number;
-  name: string;
-}
 
 interface SearchResult {
   title: string;
@@ -43,9 +31,11 @@ const SongCreate: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const [albums, setAlbums] = useState<Album[]>([]);
-  const [artists, setArtists] = useState<Artist[]>([]);
-  const [genres, setGenres] = useState<Genre[]>([]);
+  const [albums, setAlbums] = useState<(Album & { album_id: number })[]>([]);
+  const [artists, setArtists] = useState<(Artist & { artist_id: number })[]>(
+    []
+  );
+  const [genres, setGenres] = useState<(Genre & { genre_id: number })[]>([]);
 
   // Search functionality
   const [searchQuery, setSearchQuery] = useState("");
@@ -61,11 +51,58 @@ const SongCreate: React.FC = () => {
       artistService.getAll(),
       genreService.getAll(),
     ]).then(([albums, artists, genres]) => {
-      setAlbums(albums);
-      setArtists(artists);
-      setGenres(genres);
+      // Filter out items without IDs since the UI requires them
+      setAlbums(
+        albums.filter(
+          (a): a is Album & { album_id: number } => a.album_id !== undefined
+        )
+      );
+      setArtists(
+        artists.filter(
+          (a): a is Artist & { artist_id: number } => a.artist_id !== undefined
+        )
+      );
+      setGenres(
+        genres.filter(
+          (g): g is Genre & { genre_id: number } => g.genre_id !== undefined
+        )
+      );
     });
   }, []);
+
+  // Extract Apple Music track ID from various formats
+  const extractAppleMusicTrackId = (query: string): string | null => {
+    const trimmed = query.trim();
+
+    // If it's just a numeric ID (8+ digits), use it directly
+    if (/^\d{8,}$/.test(trimmed)) {
+      return trimmed;
+    }
+
+    // Extract from Apple Music song URL: music.apple.com/.../song/.../TRACK_ID
+    const songUrlMatch = trimmed.match(
+      /music\.apple\.com\/[^/]+\/song\/[^/]+\/(\d{8,})/i
+    );
+    if (songUrlMatch) {
+      return songUrlMatch[1];
+    }
+
+    // Extract from album URL with track parameter: .../album/...?i=TRACK_ID
+    const albumUrlMatch = trimmed.match(/[?&]i=(\d{8,})/i);
+    if (albumUrlMatch) {
+      return albumUrlMatch[1];
+    }
+
+    // Extract from full Apple Music URL
+    const fullUrlMatch = trimmed.match(
+      /apple\.com\/[^/]+\/(?:song|album)\/[^/]+\/(\d{8,})/i
+    );
+    if (fullUrlMatch) {
+      return fullUrlMatch[1];
+    }
+
+    return null;
+  };
 
   // Debounced search
   useEffect(() => {
@@ -73,7 +110,13 @@ const SongCreate: React.FC = () => {
       clearTimeout(searchTimeoutRef.current);
     }
 
-    if (searchQuery.trim().length < 2) {
+    const trimmedQuery = searchQuery.trim();
+
+    // Allow lookup even with just an ID (no minimum length)
+    const appleId = extractAppleMusicTrackId(trimmedQuery);
+    const isLookup = appleId !== null;
+
+    if (!isLookup && trimmedQuery.length < 2) {
       setSearchResults([]);
       setShowResults(false);
       return;
@@ -82,33 +125,47 @@ const SongCreate: React.FC = () => {
     searchTimeoutRef.current = setTimeout(async () => {
       setSearchLoading(true);
       try {
-        // Call iTunes API directly from frontend
-        const term = encodeURIComponent(searchQuery.trim());
-        const url = `https://itunes.apple.com/search?term=${term}&entity=musicTrack&limit=10`;
+        let url: string;
+
+        if (isLookup && appleId) {
+          // Use lookup API when we detect an Apple Music ID
+          url = `https://itunes.apple.com/lookup?id=${appleId}&entity=song&country=us`;
+        } else {
+          // Use search API for regular text queries
+          const term = encodeURIComponent(trimmedQuery);
+          url = `https://itunes.apple.com/search?term=${term}&media=music&entity=musicTrack&limit=25&country=us`;
+        }
+
         const response = await fetch(url);
         if (!response.ok) {
           throw new Error(`iTunes API error: ${response.statusText}`);
         }
         const data = await response.json();
-        const results: SearchResult[] = (data.results || []).map((item: any) => {
-          // Get maximum quality artwork by replacing size in URL
-          const getHighQualityArtwork = (url: string | undefined): string => {
-            if (!url) return '';
-            // Replace size parameters to get maximum quality (1200x1200)
-            // iTunes URLs format: .../source/100x100bb.jpg or .../source/60x60bb.png
-            return url.replace(/\/\d+x\d+bb\.(jpg|png)$/i, '/1200x1200bb.$1');
-          };
-          
-          return {
-            title: item.trackName || '',
-            album: item.collectionName || '',
-            artist: item.artistName || '',
-            genre: item.primaryGenreName || '',
-            coverArt: getHighQualityArtwork(item.artworkUrl100) || 
-                     getHighQualityArtwork(item.artworkUrl60) || '',
+
+        // Get maximum quality artwork by replacing size in URL
+        const getHighQualityArtwork = (url: string | undefined): string => {
+          if (!url) return "";
+          // Replace size parameters to get maximum quality (1200x1200)
+          // iTunes URLs format: .../source/100x100bb.jpg or .../source/60x60bb.png
+          return url.replace(/\/\d+x\d+bb\.(jpg|png)$/i, "/1200x1200bb.$1");
+        };
+
+        const results: SearchResult[] = (data.results || [])
+          .filter(
+            (item: any) => item.kind === "song" || item.wrapperType === "track"
+          )
+          .map((item: any) => ({
+            title: item.trackName || "",
+            album: item.collectionName || "",
+            artist: item.artistName || "",
+            genre: item.primaryGenreName || "",
+            coverArt:
+              getHighQualityArtwork(item.artworkUrl100) ||
+              getHighQualityArtwork(item.artworkUrl60) ||
+              "",
             raw: item,
-          };
-        });
+          }));
+
         setSearchResults(results);
         setShowResults(true);
       } catch (err: any) {
@@ -185,7 +242,11 @@ const SongCreate: React.FC = () => {
             title: result.album,
             artist_id: artist.artist_id,
           });
-          album = { album_id: albumId, title: result.album, artist_id: artist.artist_id };
+          album = {
+            album_id: albumId,
+            title: result.album,
+            artist_id: artist.artist_id,
+          };
           setAlbums([...albums, album]);
         }
         if (album && album.album_id) {
@@ -237,7 +298,9 @@ const SongCreate: React.FC = () => {
       }
 
       // Store file as Blob in IndexedDB
-      const fileBlob = await file.arrayBuffer().then(buf => new Blob([buf], { type: file.type }));
+      const fileBlob = await file
+        .arrayBuffer()
+        .then((buf) => new Blob([buf], { type: file.type }));
 
       // Create song in IndexedDB
       await songService.create({
@@ -292,7 +355,9 @@ const SongCreate: React.FC = () => {
                         audio.addEventListener("loadedmetadata", () => {
                           const durationSeconds = Math.floor(audio.duration);
                           const hours = Math.floor(durationSeconds / 3600);
-                          const minutes = Math.floor((durationSeconds % 3600) / 60);
+                          const minutes = Math.floor(
+                            (durationSeconds % 3600) / 60
+                          );
                           const seconds = durationSeconds % 60;
 
                           // Format as PostgreSQL interval: Always use HH:MM:SS format to avoid ambiguity
@@ -329,7 +394,13 @@ const SongCreate: React.FC = () => {
             </div>
           </div>
           {duration && (
-            <div style={{ marginTop: "4px", fontSize: "0.9em", color: "var(--text-muted)" }}>
+            <div
+              style={{
+                marginTop: "4px",
+                fontSize: "0.9em",
+                color: "var(--text-muted)",
+              }}
+            >
               Duration: {duration}
             </div>
           )}
@@ -346,9 +417,20 @@ const SongCreate: React.FC = () => {
             className="form-input"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="type song name to search..."
+            placeholder="type song name or paste Apple Music link..."
             onFocus={() => searchResults.length > 0 && setShowResults(true)}
           />
+          <div
+            style={{
+              marginTop: "4px",
+              fontSize: "0.85em",
+              color: "var(--text-muted)",
+              fontStyle: "italic",
+            }}
+          >
+            Tip: If search doesn't find it, paste the Apple Music link or track
+            ID
+          </div>
           {showResults && searchResults.length > 0 && (
             <div
               style={{
@@ -367,7 +449,13 @@ const SongCreate: React.FC = () => {
               }}
             >
               {searchLoading && (
-                <div style={{ padding: "12px", textAlign: "center", color: "var(--text-primary)" }}>
+                <div
+                  style={{
+                    padding: "12px",
+                    textAlign: "center",
+                    color: "var(--text-primary)",
+                  }}
+                >
                   searching...
                 </div>
               )}
@@ -386,7 +474,8 @@ const SongCreate: React.FC = () => {
                       backgroundColor: "var(--card-bg)",
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = "var(--button-hover)";
+                      e.currentTarget.style.backgroundColor =
+                        "var(--button-hover)";
                     }}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.backgroundColor = "var(--card-bg)";
@@ -405,15 +494,30 @@ const SongCreate: React.FC = () => {
                       />
                     )}
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: "bold", color: "var(--text-primary)" }}>
+                      <div
+                        style={{
+                          fontWeight: "bold",
+                          color: "var(--text-primary)",
+                        }}
+                      >
                         {result.title || "Unknown"}
                       </div>
-                      <div style={{ fontSize: "0.9em", color: "var(--text-secondary)" }}>
+                      <div
+                        style={{
+                          fontSize: "0.9em",
+                          color: "var(--text-secondary)",
+                        }}
+                      >
                         {result.artist || "Unknown Artist"}
                         {result.album && ` • ${result.album}`}
                       </div>
                       {result.genre && (
-                        <div style={{ fontSize: "0.8em", color: "var(--text-muted)" }}>
+                        <div
+                          style={{
+                            fontSize: "0.8em",
+                            color: "var(--text-muted)",
+                          }}
+                        >
                           {result.genre}
                         </div>
                       )}
