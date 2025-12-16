@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
-import { 
-  playlistService, 
+import {
+  playlistService,
   artistService,
   albumService,
-  getSongUrl 
+  songArtistService,
+  getSongUrl,
+  SongWithRelations,
 } from "../services/db";
-import { SongWithRelations } from "../services/db";
 
 interface Playlist {
   playlist_id?: number;
@@ -50,14 +51,35 @@ const PlaylistDetail: React.FC = () => {
           artistService.getAll(),
           albumService.getAll(),
         ]);
-        const artistMap = new Map(artistsData.map(a => [a.artist_id, a.name]));
-        const albumMap = new Map(albumsData.map(a => [a.album_id, a.title]));
-        
-        const songsWithRelations = songsData.map(song => ({
-          ...song,
-          artist_name: song.artist_id ? artistMap.get(song.artist_id) : undefined,
-          album_title: song.album_id ? albumMap.get(song.album_id) : undefined,
-        }));
+        const artistMap = new Map(artistsData.map((a) => [a.artist_id, a.name]));
+        const albumMap = new Map(albumsData.map((a) => [a.album_id, a.title]));
+
+        const songsWithRelations: SongWithRelations[] = await Promise.all(
+          songsData.map(async (song) => {
+            const extraArtistIds = song.song_id
+              ? await songArtistService.getArtistIdsForSong(song.song_id)
+              : [];
+            const ids = new Set<number>();
+            if (song.artist_id != null) ids.add(song.artist_id);
+            extraArtistIds.forEach((id) => ids.add(id));
+            const artistNames = Array.from(ids)
+              .map((id) => artistMap.get(id))
+              .filter((n): n is string => !!n);
+            const artistDisplay =
+              artistNames.length > 0
+                ? artistNames.join(", ")
+                : song.artist_id
+                ? artistMap.get(song.artist_id)
+                : undefined;
+
+            return {
+              ...song,
+              artist_names: artistNames,
+              artist_name: artistDisplay,
+              album_title: song.album_id ? albumMap.get(song.album_id) : undefined,
+            };
+          })
+        );
         
         setPlaylist({
           ...playlistData,

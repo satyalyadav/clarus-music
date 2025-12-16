@@ -1,8 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
-import { artistService, songService, albumService, getSongUrl } from "../services/db";
-import { SongWithRelations } from "../services/db";
+import {
+  artistService,
+  songService,
+  albumService,
+  songArtistService,
+  getSongUrl,
+  SongWithRelations,
+} from "../services/db";
 
 interface Artist {
   artist_id?: number;
@@ -38,14 +44,46 @@ const ArtistDetail: React.FC = () => {
         
         if (artistData) {
           // Get songs with relations
-          const albums = await albumService.getAll();
-          const albumMap = new Map(albums.map(a => [a.album_id, { title: a.title, cover_image: a.cover_image }]));
-          
-          const songsWithRelations = songsData.map(song => ({
-            ...song,
-            album_title: song.album_id ? albumMap.get(song.album_id)?.title : undefined,
-            album_cover_image: song.album_id ? albumMap.get(song.album_id)?.cover_image : undefined,
-          }));
+          const [albums, allArtists] = await Promise.all([
+            albumService.getAll(),
+            artistService.getAll(),
+          ]);
+          const albumMap = new Map(
+            albums.map((a) => [
+              a.album_id,
+              { title: a.title, cover_image: a.cover_image },
+            ])
+          );
+          const artistMap = new Map(allArtists.map((a) => [a.artist_id, a.name]));
+
+          const songsWithRelations: SongWithRelations[] = await Promise.all(
+            songsData.map(async (song) => {
+              const extraArtistIds = song.song_id
+                ? await songArtistService.getArtistIdsForSong(song.song_id)
+                : [];
+              const ids = new Set<number>();
+              if (song.artist_id != null) ids.add(song.artist_id);
+              extraArtistIds.forEach((id) => ids.add(id));
+
+              const artistNames = Array.from(ids)
+                .map((id) => artistMap.get(id))
+                .filter((n): n is string => !!n);
+              const artistDisplay =
+                artistNames.length > 0 ? artistNames.join(", ") : artistData.name;
+
+              return {
+                ...song,
+                artist_names: artistNames,
+                artist_name: artistDisplay,
+                album_title: song.album_id
+                  ? albumMap.get(song.album_id)?.title
+                  : undefined,
+                album_cover_image: song.album_id
+                  ? albumMap.get(song.album_id)?.cover_image
+                  : undefined,
+              };
+            })
+          );
           
           setArtist({
             ...artistData,
@@ -70,7 +108,7 @@ const ArtistDetail: React.FC = () => {
         return {
           url,
           title: s.title,
-          artist: artist.name,
+          artist: s.artist_name || artist.name,
           album: s.album_title || "",
           cover: s.cover_image || s.album_cover_image || "",
           songId: s.song_id,
@@ -89,7 +127,7 @@ const ArtistDetail: React.FC = () => {
         return {
           url,
           title: s.title,
-          artist: artist.name,
+          artist: s.artist_name || artist.name,
           album: s.album_title || "",
           cover: s.cover_image || s.album_cover_image || "",
           songId: s.song_id,
@@ -101,7 +139,7 @@ const ArtistDetail: React.FC = () => {
     playTrack({
       url: songUrl,
       title: song.title,
-      artist: artist.name,
+      artist: song.artist_name || artist.name,
       album: song.album_title || "",
       cover: song.cover_image || song.album_cover_image || "",
       songId: song.song_id,

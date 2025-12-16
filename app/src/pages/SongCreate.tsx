@@ -5,6 +5,7 @@ import {
   albumService,
   artistService,
   genreService,
+  songArtistService,
   Album,
   Artist,
   Genre,
@@ -36,6 +37,7 @@ const SongCreate: React.FC = () => {
     []
   );
   const [genres, setGenres] = useState<(Genre & { genre_id: number })[]>([]);
+  const [selectedArtistIds, setSelectedArtistIds] = useState<number[]>([]);
 
   // Search functionality
   const [searchQuery, setSearchQuery] = useState("");
@@ -102,6 +104,31 @@ const SongCreate: React.FC = () => {
     }
 
     return null;
+  };
+
+  // Split artist names on common separators and normalize
+  const splitArtistNames = (raw: string): string[] => {
+    if (!raw) return [];
+    const cleaned = raw
+      .replace(/\s+feat\.?/gi, ",")
+      .replace(/\s+featuring/gi, ",");
+    return cleaned
+      .split(/,|&| x | X |\/|\\/gi)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  };
+
+  // Extract featured artists from title patterns like "Song (feat. X, Y & Z)"
+  const extractFeaturedFromTitle = (rawTitle: string): string[] => {
+    if (!rawTitle) return [];
+    const match =
+      rawTitle.match(/\(feat\.([^)]*)\)/i) ||
+      rawTitle.match(/\(featuring([^)]*)\)/i);
+    if (!match) return [];
+    return match[1]
+      .split(/,|&| x | X |\/|\\/gi)
+      .map((s) => s.trim())
+      .filter(Boolean);
   };
 
   // Debounced search
@@ -208,18 +235,43 @@ const SongCreate: React.FC = () => {
     setCoverImage(result.coverArt || "");
 
     try {
-      // Find or create artist
-      let artist = artists.find((a) => a.name === result.artist);
-      if (!artist && result.artist) {
-        const artistId = await artistService.create({
-          name: result.artist,
-        });
-        artist = { artist_id: artistId, name: result.artist };
-        setArtists([...artists, artist]);
+      // Parse all artist names (main + featured)
+      const mainArtistNames = splitArtistNames(result.artist || "");
+      const featuredFromTitle = extractFeaturedFromTitle(result.title || "");
+      const allNames = Array.from(
+        new Set([...mainArtistNames, ...featuredFromTitle])
+      );
+
+      // Fallback: if parsing failed, use raw artist string as single artist
+      const effectiveNames =
+        allNames.length > 0 && mainArtistNames.length > 0
+          ? allNames
+          : result.artist
+          ? [result.artist]
+          : [];
+
+      let primaryArtistId: number | null = null;
+      const allArtistIds: number[] = [];
+
+      for (const name of effectiveNames) {
+        let artist = artists.find((a) => a.name === name);
+        if (!artist) {
+          const newId = await artistService.create({ name });
+          artist = { artist_id: newId, name };
+          setArtists((prev) => [...prev, artist!]);
+        }
+        if (artist.artist_id != null) {
+          allArtistIds.push(artist.artist_id);
+          if (primaryArtistId == null) {
+            primaryArtistId = artist.artist_id;
+          }
+        }
       }
-      if (artist && artist.artist_id) {
-        setArtistId(artist.artist_id.toString());
+
+      if (primaryArtistId != null) {
+        setArtistId(primaryArtistId.toString());
       }
+      setSelectedArtistIds(allArtistIds);
 
       // Find or create genre
       let genre = genres.find((g) => g.name === result.genre);
@@ -234,18 +286,18 @@ const SongCreate: React.FC = () => {
         setGenreId(genre.genre_id.toString());
       }
 
-      // Find or create album (requires artist_id)
-      if (result.album && artist && artist.artist_id) {
+      // Find or create album (requires primary artist_id)
+      if (result.album && primaryArtistId != null) {
         let album = albums.find((a) => a.title === result.album);
         if (!album) {
           const albumId = await albumService.create({
             title: result.album,
-            artist_id: artist.artist_id,
+            artist_id: primaryArtistId,
           });
           album = {
             album_id: albumId,
             title: result.album,
-            artist_id: artist.artist_id,
+            artist_id: primaryArtistId,
           };
           setAlbums([...albums, album]);
         }
@@ -303,7 +355,7 @@ const SongCreate: React.FC = () => {
         .then((buf) => new Blob([buf], { type: file.type }));
 
       // Create song in IndexedDB
-      await songService.create({
+      const newSongId = await songService.create({
         title: title.trim(),
         artist_id: parseInt(artistId),
         genre_id: parseInt(genreId),
@@ -312,6 +364,14 @@ const SongCreate: React.FC = () => {
         file_blob: fileBlob,
         cover_image: coverImage || null,
       });
+
+      // Associate all detected artists with this song (many-to-many)
+      const primaryId = parseInt(artistId);
+      const allIds =
+        selectedArtistIds.length > 0
+          ? Array.from(new Set([primaryId, ...selectedArtistIds]))
+          : [primaryId];
+      await songArtistService.setArtistsForSong(newSongId, allIds);
 
       navigate("/songs");
     } catch (err: any) {

@@ -48,6 +48,12 @@ export interface PlaylistSong {
   song_id: number;
 }
 
+// Join table for many-to-many relationship between songs and artists
+export interface SongArtist {
+  song_id: number;
+  artist_id: number;
+}
+
 // Database class
 class MusicLibraryDB extends Dexie {
   songs!: Table<Song, number>;
@@ -56,6 +62,7 @@ class MusicLibraryDB extends Dexie {
   genres!: Table<Genre, number>;
   playlists!: Table<Playlist, number>;
   playlistSongs!: Table<PlaylistSong, [number, number]>;
+  songArtists!: Table<SongArtist, [number, number]>;
 
   constructor() {
     super('MusicLibraryDB');
@@ -67,6 +74,11 @@ class MusicLibraryDB extends Dexie {
       genres: '++genre_id, name, created_at',
       playlists: '++playlist_id, title, created_at',
       playlistSongs: '[playlist_id+song_id], playlist_id, song_id',
+    });
+
+    // Add songArtists many-to-many table in version 2
+    this.version(2).stores({
+      songArtists: '[song_id+artist_id], song_id, artist_id',
     });
   }
 }
@@ -106,8 +118,9 @@ export const songService = {
     const albumId = song.album_id;
     const genreId = song.genre_id;
 
-    // Remove from playlists and delete the song
+    // Remove from playlists, song-artist mappings, and delete the song
     await db.playlistSongs.where('song_id').equals(id).delete();
+    await db.songArtists.where('song_id').equals(id).delete();
     await db.songs.delete(id);
 
     // Cascade delete: Check if artist, album, or genre should be deleted
@@ -147,7 +160,41 @@ export const songService = {
   },
 
   async getByArtist(artistId: number): Promise<Song[]> {
-    return await db.songs.where('artist_id').equals(artistId).toArray();
+    // Songs where this artist is the primary artist
+    const primarySongs = await db.songs
+      .where('artist_id')
+      .equals(artistId)
+      .toArray();
+
+    // Songs linked through the songArtists join table
+    const joinRows = await db.songArtists
+      .where('artist_id')
+      .equals(artistId)
+      .toArray();
+    const songIds = Array.from(
+      new Set(joinRows.map((r) => r.song_id).filter((id) => id != null))
+    );
+
+    let relatedSongs: Song[] = [];
+    if (songIds.length > 0) {
+      relatedSongs = await db.songs.where('song_id').anyOf(songIds).toArray();
+    }
+
+    // Merge and deduplicate by song_id
+    const all = [...primarySongs, ...relatedSongs];
+    const seen = new Set<number>();
+    const deduped: Song[] = [];
+    for (const s of all) {
+      if (s.song_id == null) {
+        deduped.push(s);
+        continue;
+      }
+      if (!seen.has(s.song_id)) {
+        seen.add(s.song_id);
+        deduped.push(s);
+      }
+    }
+    return deduped;
   },
 
   async getByAlbum(albumId: number): Promise<Song[]> {
@@ -217,7 +264,10 @@ export const artistService = {
   },
 
   async delete(id: number): Promise<void> {
-    // Delete all songs by this artist (cascade)
+    // Remove song-artist relationships for this artist
+    await db.songArtists.where('artist_id').equals(id).delete();
+
+    // Delete all songs where this is the primary artist (cascade)
     const songs = await db.songs.where('artist_id').equals(id).toArray();
     for (const song of songs) {
       if (song.song_id) {
@@ -331,8 +381,36 @@ export const playlistService = {
   },
 };
 
+// Song-artist join operations
+export const songArtistService = {
+  async setArtistsForSong(songId: number, artistIds: number[]): Promise<void> {
+    // Remove existing mappings
+    await db.songArtists.where('song_id').equals(songId).delete();
+    if (artistIds.length === 0) return;
+
+    // Add new mappings (deduplicated)
+    const uniqueIds = Array.from(new Set(artistIds));
+    await db.songArtists.bulkAdd(
+      uniqueIds.map((artistId) => ({ song_id: songId, artist_id: artistId }))
+    );
+  },
+
+  async getArtistIdsForSong(songId: number): Promise<number[]> {
+    const rows = await db.songArtists.where('song_id').equals(songId).toArray();
+    return rows.map((r) => r.artist_id);
+  },
+
+  async getSongIdsForArtist(artistId: number): Promise<number[]> {
+    const rows = await db.songArtists.where('artist_id').equals(artistId).toArray();
+    return rows.map((r) => r.song_id);
+  },
+};
+
 // Helper function to get song with related data (for display)
 export interface SongWithRelations extends Song {
+  // All associated artist names (primary + featured/secondary)
+  artist_names?: string[];
+  // Backwards-compatible combined artist string for display
   artist_name?: string;
   album_title?: string;
   genre_name?: string;
@@ -348,9 +426,56 @@ export async function getSongsWithRelations(): Promise<SongWithRelations[]> {
   const albumMap = new Map(albums.map(a => [a.album_id, a.title]));
   const genreMap = new Map(genres.map(g => [g.genre_id, g.name]));
 
+   // Load song-artist mappings for all songs in one go
+  const songIds = songs
+    .map((s) => s.song_id)
+    .filter((id): id is number => id !== undefined);
+
+  let songArtistRows: SongArtist[] = [];
+  if (songIds.length > 0) {
+    songArtistRows = await db.songArtists
+      .where('song_id')
+      .anyOf(songIds)
+      .toArray();
+  }
+
+  const songIdToArtistIds = new Map<number, number[]>();
+  for (const row of songArtistRows) {
+    if (!songIdToArtistIds.has(row.song_id)) {
+      songIdToArtistIds.set(row.song_id, []);
+    }
+    songIdToArtistIds.get(row.song_id)!.push(row.artist_id);
+  }
+
   return songs.map(song => ({
     ...song,
-    artist_name: artistMap.get(song.artist_id),
+    artist_names: (() => {
+      const ids = new Set<number>();
+      if (song.artist_id != null) {
+        ids.add(song.artist_id);
+      }
+      const extraIds = song.song_id ? songIdToArtistIds.get(song.song_id) : undefined;
+      (extraIds || []).forEach((id) => ids.add(id));
+      const names = Array.from(ids)
+        .map((id) => artistMap.get(id))
+        .filter((n): n is string => !!n);
+      return names;
+    })(),
+    artist_name: (() => {
+      const names = (() => {
+        const ids = new Set<number>();
+        if (song.artist_id != null) {
+          ids.add(song.artist_id);
+        }
+        const extraIds = song.song_id ? songIdToArtistIds.get(song.song_id) : undefined;
+        (extraIds || []).forEach((id) => ids.add(id));
+        const list = Array.from(ids)
+          .map((id) => artistMap.get(id))
+          .filter((n): n is string => !!n);
+        return list;
+      })();
+      return names.length > 0 ? names.join(', ') : artistMap.get(song.artist_id);
+    })(),
     album_title: song.album_id ? albumMap.get(song.album_id) : undefined,
     genre_name: genreMap.get(song.genre_id),
   }));
