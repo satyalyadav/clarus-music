@@ -87,6 +87,7 @@ const PlaylistDetail: React.FC = () => {
           artist: s.artist_name || "",
           album: s.album_title || "",
           cover: s.cover_image || "",
+          songId: s.song_id,
         };
       })
     );
@@ -105,6 +106,7 @@ const PlaylistDetail: React.FC = () => {
           artist: s.artist_name || "",
           album: s.album_title || "",
           cover: s.cover_image || "",
+          songId: s.song_id,
         };
       })
     );
@@ -116,6 +118,7 @@ const PlaylistDetail: React.FC = () => {
       artist: song.artist_name || "",
       album: song.album_title || "",
       cover: song.cover_image || "",
+      songId: song.song_id,
     });
   };
 
@@ -222,8 +225,10 @@ const PlaylistDetail: React.FC = () => {
       ) : (
         <div className="list">
           {playlist.songs.map((song, index) => {
-            const isCurrent = currentTrack?.title === song.title && 
-                             currentTrack?.artist === (song.artist_name || "");
+            // Use songId for reliable matching, fallback to title/artist matching
+            const isCurrent = (song.song_id && currentTrack?.songId === song.song_id) ||
+                             (currentTrack?.title === song.title && 
+                              currentTrack?.artist === (song.artist_name || ""));
             const isCurrentPlaying = isCurrent && isPlaying;
 
             return (

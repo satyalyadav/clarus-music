@@ -77,6 +77,7 @@ const GenreDetail: React.FC = () => {
           artist: s.artist_name || "",
           album: s.album_title || "",
           cover: s.cover_image || "",
+          songId: s.song_id,
         };
       })
     );
@@ -95,6 +96,7 @@ const GenreDetail: React.FC = () => {
           artist: s.artist_name || "",
           album: s.album_title || "",
           cover: s.cover_image || "",
+          songId: s.song_id,
         };
       })
     );
@@ -106,6 +108,7 @@ const GenreDetail: React.FC = () => {
       artist: song.artist_name || "",
       album: song.album_title || "",
       cover: song.cover_image || "",
+      songId: song.song_id,
     });
   };
 
@@ -145,8 +148,10 @@ const GenreDetail: React.FC = () => {
       ) : (
         <div className="list">
           {genre.songs.map((song) => {
-            const isCurrent = currentTrack?.title === song.title && 
-                             currentTrack?.artist === (song.artist_name || "");
+            // Use songId for reliable matching, fallback to title/artist matching
+            const isCurrent = (song.song_id && currentTrack?.songId === song.song_id) ||
+                             (currentTrack?.title === song.title && 
+                              currentTrack?.artist === (song.artist_name || ""));
             const isCurrentPlaying = isCurrent && isPlaying;
 
             return (

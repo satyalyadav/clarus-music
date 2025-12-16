@@ -84,6 +84,7 @@ const AlbumDetail: React.FC = () => {
           artist: s.artist_name || "",
           album: album.title,
           cover: s.cover_image || album.cover_image || "",
+          songId: s.song_id,
         };
       })
     );
@@ -102,6 +103,7 @@ const AlbumDetail: React.FC = () => {
           artist: s.artist_name || "",
           album: album.title,
           cover: s.cover_image || album.cover_image || "",
+          songId: s.song_id,
         };
       })
     );
@@ -113,6 +115,7 @@ const AlbumDetail: React.FC = () => {
       artist: song.artist_name || "",
       album: album.title,
       cover: song.cover_image || album.cover_image || "",
+      songId: song.song_id,
     });
   };
 
@@ -178,10 +181,10 @@ const AlbumDetail: React.FC = () => {
       ) : (
         <div className="list">
           {album.songs.map((song, index) => {
-            // Note: We can't easily compare object URLs, so we'll check by title/artist
-            // In a real app, you might want to store the song ID in the track object
-            const isCurrent = currentTrack?.title === song.title && 
-                             currentTrack?.artist === (song.artist_name || "");
+            // Use songId for reliable matching, fallback to title/artist matching
+            const isCurrent = (song.song_id && currentTrack?.songId === song.song_id) ||
+                             (currentTrack?.title === song.title && 
+                              currentTrack?.artist === (song.artist_name || ""));
             const isCurrentPlaying = isCurrent && isPlaying;
 
             return (
