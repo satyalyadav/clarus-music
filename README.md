@@ -18,6 +18,7 @@ Everything is stored locally in your browser. Your music library is tied to the 
 
 - **Node.js** (v18 or later recommended)
 - **npm** or **yarn**
+- **Spotify Developer Account** (optional, for artist images)
 
 ## Installation
 
@@ -31,12 +32,28 @@ Everything is stored locally in your browser. Your music library is tied to the 
 2. **Install Dependencies**
 
    ```bash
+   cd app
    npm install
    ```
 
    This will install frontend dependencies.
 
-3. **Run the Application**
+3. **Configure Spotify API (Optional - for artist images)**
+
+   Artist images are automatically fetched from Spotify API in the background. To enable this feature:
+
+   - Register your app at [Spotify Developer Dashboard](https://developer.spotify.com/dashboard/)
+   - Create a new app and get your Client ID and Client Secret
+   - Copy `app/.env.example` to `app/.env`
+   - Add your credentials to `app/.env`:
+     ```
+     VITE_SPOTIFY_CLIENT_ID=your_client_id
+     VITE_SPOTIFY_CLIENT_SECRET=your_client_secret
+     ```
+
+   **Note:** Without Spotify credentials, artist images won't be fetched, but the app will work normally with placeholder icons.
+
+4. **Run the Application**
 
    ```bash
    npm run dev
@@ -64,6 +81,7 @@ npm run build
 - **Build Tool**: Vite
 - **Routing**: React Router
 - **State Management**: React Context API
+- **External APIs**: Spotify Web API (for artist images), iTunes Search API (for song search)
 
 ## Browser Compatibility
 

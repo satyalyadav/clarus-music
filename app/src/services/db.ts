@@ -26,6 +26,7 @@ export interface Album {
 export interface Artist {
   artist_id?: number;
   name: string;
+  image_url?: string | null;
   created_at?: number;
 }
 
@@ -79,6 +80,11 @@ class MusicLibraryDB extends Dexie {
     // Add songArtists many-to-many table in version 2
     this.version(2).stores({
       songArtists: '[song_id+artist_id], song_id, artist_id',
+    });
+
+    // Add image_url field to artists in version 3
+    this.version(3).stores({
+      artists: '++artist_id, name, image_url, created_at',
     });
   }
 }

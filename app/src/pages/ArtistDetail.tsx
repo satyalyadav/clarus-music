@@ -9,10 +9,12 @@ import {
   getSongUrl,
   SongWithRelations,
 } from "../services/db";
+import { artistImageService } from "../services/artistImageService";
 
 interface Artist {
   artist_id?: number;
   name: string;
+  image_url?: string | null;
   songs: SongWithRelations[];
 }
 
@@ -89,6 +91,20 @@ const ArtistDetail: React.FC = () => {
             ...artistData,
             songs: songsWithRelations,
           });
+
+          // Fetch image in background if not present
+          if (artistData.artist_id && artistData.name && !artistData.image_url) {
+            artistImageService
+              .fetchAndUpdateArtistImage(artistData.artist_id, artistData.name)
+              .then((imageUrl) => {
+                if (imageUrl) {
+                  setArtist((prev) => (prev ? { ...prev, image_url: imageUrl } : null));
+                }
+              })
+              .catch((err) => {
+                console.error("Error fetching artist image:", err);
+              });
+          }
         }
         setError(null);
       } catch (err: any) {
@@ -165,15 +181,38 @@ const ArtistDetail: React.FC = () => {
           style={{
             width: "200px",
             height: "200px",
-            background: "var(--card-bg)",
+            background: artist.image_url ? "transparent" : "var(--card-bg)",
             borderRadius: "50%",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             fontSize: "80px",
+            overflow: "hidden",
+            flexShrink: 0,
           }}
         >
-          🎤
+          {artist.image_url ? (
+            <img
+              src={artist.image_url}
+              alt={artist.name}
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+              }}
+              onError={(e) => {
+                // Fallback to emoji if image fails to load
+                e.currentTarget.style.display = "none";
+                const parent = e.currentTarget.parentElement;
+                if (parent) {
+                  parent.innerHTML = "🎤";
+                  parent.style.background = "var(--card-bg)";
+                }
+              }}
+            />
+          ) : (
+            <span>🎤</span>
+          )}
         </div>
         <div>
           <h1 className="section-title" style={{ marginBottom: "16px" }}>

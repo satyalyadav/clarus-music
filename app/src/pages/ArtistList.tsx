@@ -1,11 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { artistService } from "../services/db";
-
-interface Artist {
-  artist_id?: number;
-  name: string;
-}
+import { artistService, Artist } from "../services/db";
+import { artistImageService } from "../services/artistImageService";
 
 const ArtistList: React.FC = () => {
   const [artists, setArtists] = useState<Artist[]>([]);
@@ -16,9 +12,18 @@ const ArtistList: React.FC = () => {
   useEffect(() => {
     artistService
       .getAll()
-      .then((artists) => {
+      .then(async (artists) => {
         setArtists(artists);
         setError(null);
+        
+        // Fetch images in background for artists without images
+        // This runs asynchronously and updates state as images are fetched
+        artistImageService.fetchImagesForArtists(artists).then(() => {
+          // Refresh artists list to show newly fetched images
+          artistService.getAll().then((updatedArtists) => {
+            setArtists(updatedArtists);
+          });
+        });
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
@@ -48,9 +53,34 @@ const ArtistList: React.FC = () => {
                   alignItems: "center",
                   justifyContent: "center",
                   fontSize: "48px",
+                  overflow: "hidden",
+                  background: artist.image_url ? "transparent" : "var(--card-bg)",
                 }}
               >
-                🎤
+                {artist.image_url ? (
+                  <img
+                    src={artist.image_url}
+                    alt={artist.name}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                    }}
+                    onError={(e) => {
+                      // Fallback to emoji if image fails to load
+                      e.currentTarget.style.display = "none";
+                      const parent = e.currentTarget.parentElement;
+                      if (parent) {
+                        parent.innerHTML = "🎤";
+                        parent.style.display = "flex";
+                        parent.style.alignItems = "center";
+                        parent.style.justifyContent = "center";
+                      }
+                    }}
+                  />
+                ) : (
+                  <span>🎤</span>
+                )}
               </div>
               <div className="grid-item-content">
                 <div className="grid-item-title">{artist.name}</div>
