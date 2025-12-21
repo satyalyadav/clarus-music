@@ -10,6 +10,7 @@ import {
   getSongUrl,
   SongWithRelations,
 } from "../services/db";
+import { formatDuration } from "../utils/formatDuration";
 
 interface Genre {
   genre_id?: number;
@@ -17,13 +18,7 @@ interface Genre {
   songs: SongWithRelations[];
 }
 
-function formatDuration(d: any): string {
-  if (typeof d === "string") return d;
-  const h = d.hours || 0;
-  const m = String(d.minutes || 0).padStart(2, "0");
-  const s = String(d.seconds || 0).padStart(2, "0");
-  return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
-}
+import { formatDuration } from "../utils/formatDuration";
 
 const GenreDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -50,7 +45,12 @@ const GenreDetail: React.FC = () => {
             albumService.getAll(),
           ]);
           const artistMap = new Map(artistsData.map((a) => [a.artist_id, a.name]));
-          const albumMap = new Map(albumsData.map((a) => [a.album_id, a.title]));
+          const albumMap = new Map(
+            albumsData.map((a) => [
+              a.album_id,
+              { title: a.title, cover_image: a.cover_image },
+            ])
+          );
 
           const songsWithRelations: SongWithRelations[] = await Promise.all(
             songsData.map(async (song) => {
@@ -74,7 +74,12 @@ const GenreDetail: React.FC = () => {
                 ...song,
                 artist_names: artistNames,
                 artist_name: artistDisplay,
-                album_title: song.album_id ? albumMap.get(song.album_id) : undefined,
+                album_title: song.album_id
+                  ? albumMap.get(song.album_id)?.title
+                  : undefined,
+                album_cover_image: song.album_id
+                  ? albumMap.get(song.album_id)?.cover_image
+                  : undefined,
               };
             })
           );
@@ -104,13 +109,13 @@ const GenreDetail: React.FC = () => {
           title: s.title,
           artist: s.artist_name || "",
           album: s.album_title || "",
-          cover: s.cover_image || "",
+          cover: s.cover_image || s.album_cover_image || "",
           songId: s.song_id,
         };
       })
     );
     setQueue(tracks);
-    if (tracks[0]) playTrack(tracks[0]);
+    if (tracks[0]) playTrack(tracks[0], 0);
   };
 
   const handlePlaySong = async (song: SongWithRelations) => {
@@ -123,21 +128,30 @@ const GenreDetail: React.FC = () => {
           title: s.title,
           artist: s.artist_name || "",
           album: s.album_title || "",
-          cover: s.cover_image || "",
+          cover: s.cover_image || s.album_cover_image || "",
           songId: s.song_id,
         };
       })
     );
     setQueue(tracks);
-    const songUrl = await getSongUrl(song);
-    playTrack({
-      url: songUrl,
-      title: song.title,
-      artist: song.artist_name || "",
-      album: song.album_title || "",
-      cover: song.cover_image || "",
-      songId: song.song_id,
-    });
+    
+    // Find the index of the song being played in the queue
+    const songIndex = tracks.findIndex(t => t.songId === song.song_id);
+    
+    if (songIndex !== -1) {
+      playTrack(tracks[songIndex], songIndex);
+    } else {
+      // Fallback: play directly if not found in queue
+      const songUrl = await getSongUrl(song);
+      playTrack({
+        url: songUrl,
+        title: song.title,
+        artist: song.artist_name || "",
+        album: song.album_title || "",
+        cover: song.cover_image || song.album_cover_image || "",
+        songId: song.song_id,
+      });
+    }
   };
 
   if (loading) return <div className="loading">Loading genre...</div>;
@@ -182,12 +196,27 @@ const GenreDetail: React.FC = () => {
                               currentTrack?.artist === (song.artist_name || ""));
             const isCurrentPlaying = isCurrent && isPlaying;
 
+            const coverImage = song.cover_image || song.album_cover_image;
+
             return (
               <div 
                 key={song.song_id} 
                 className="list-item"
                 onClick={() => isCurrent ? togglePlayPause() : handlePlaySong(song)}
               >
+                {coverImage && (
+                  <img
+                    src={coverImage}
+                    alt={song.title}
+                    style={{
+                      width: "50px",
+                      height: "50px",
+                      objectFit: "cover",
+                      borderRadius: "4px",
+                      marginRight: "12px",
+                    }}
+                  />
+                )}
                 <div className="list-item-content">
                   <div
                     className={`list-item-title ${isCurrent ? "playing" : ""}`}

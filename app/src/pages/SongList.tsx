@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { getSongsWithRelations, getSongUrl, revokeSongUrl } from "../services/db";
+import { formatDuration } from "../utils/formatDuration";
 
 interface Song {
   song_id?: number;
@@ -12,59 +13,6 @@ interface Song {
   album_title?: string;
   file_blob?: Blob;
   file_handle?: FileSystemFileHandle;
-}
-
-function formatDuration(d: any): string {
-  if (typeof d === "string") {
-    // Handle PostgreSQL interval string format (e.g., "3:45" or "1:23:45" or "3:45.123" or "5:12:00")
-    const parts = d.split(":");
-    if (parts.length === 2) {
-      // MM:SS format - remove milliseconds if present
-      const secondsPart = parts[1].split(".")[0]; // Remove decimal part
-      return `${parts[0]}:${secondsPart.padStart(2, "0")}`;
-    } else if (parts.length === 3) {
-      // Could be HH:MM:SS format
-      const hours = parseInt(parts[0], 10);
-      const minutes = parseInt(parts[1], 10);
-      const secondsPart = parts[2].split(".")[0]; // Remove decimal part
-      const seconds = parseInt(secondsPart, 10);
-      
-      // If hours is 0, show as MM:SS
-      if (hours === 0) {
-        return `${minutes}:${secondsPart.padStart(2, "0")}`;
-      }
-      
-      // Heuristic: If hours < 60 and total duration < 2 hours (7200 seconds),
-      // it's likely stored incorrectly as HH:MM:SS when it should be MM:SS
-      // Treat hours as minutes in this case
-      const totalSeconds = hours * 3600 + minutes * 60 + seconds;
-      if (hours < 60 && totalSeconds < 7200 && seconds === 0) {
-        // Likely meant to be MM:SS format
-        return `${hours}:${String(minutes).padStart(2, "0")}`;
-      }
-      
-      // For songs with hours, show HH:MM:SS
-      return `${hours}:${String(minutes).padStart(2, "0")}:${secondsPart.padStart(2, "0")}`;
-    }
-    return d;
-  }
-  // Handle object format from database (PostgreSQL interval)
-  const h = d.hours || 0;
-  const m = d.minutes || 0;
-  const s = Math.floor(d.seconds || 0); // Floor to remove milliseconds
-  
-  // Heuristic: If hours < 60 and total duration < 2 hours,
-  // it's likely stored incorrectly - treat hours as minutes
-  const totalSeconds = (h || 0) * 3600 + (m || 0) * 60 + (s || 0);
-  if (h > 0 && h < 60 && totalSeconds < 7200 && s === 0) {
-    return `${h}:${String(m).padStart(2, "0")}`;
-  }
-  
-  // Format: MM:SS if no hours, HH:MM:SS if hours > 0
-  if (h > 0) {
-    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
-  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 const SongList: React.FC = () => {
@@ -158,7 +106,7 @@ const SongList: React.FC = () => {
         return;
       }
       setQueue(validTracks);
-      if (validTracks[0]) playTrack(validTracks[0]);
+      if (validTracks[0]) playTrack(validTracks[0], 0);
     } catch (err) {
       console.error('Error playing all songs:', err);
       alert(`Failed to play songs: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -204,35 +152,44 @@ const SongList: React.FC = () => {
           }
         })
       );
-      setQueue(tracks);
+      const validTracks = tracks.filter(t => t.url);
+      setQueue(validTracks);
       
-      const songUrl = song.song_id ? songUrls.get(song.song_id) : null;
-      let finalUrl = songUrl;
+      // Find the index of the song being played
+      const songIndex = validTracks.findIndex(t => t.songId === song.song_id);
       
-      if (!songUrl && song.song_id) {
-        try {
-          finalUrl = await getSongUrl(song);
-          setSongUrls(prev => new Map(prev).set(song.song_id!, finalUrl));
-        } catch (err) {
-          console.error(`Failed to get URL for song ${song.song_id}:`, err);
-          alert(`Cannot play song: ${err instanceof Error ? err.message : 'Song file not available'}`);
+      if (songIndex !== -1) {
+        playTrack(validTracks[songIndex], songIndex);
+      } else {
+        // Fallback: try to get URL and play directly
+        const songUrl = song.song_id ? songUrls.get(song.song_id) : null;
+        let finalUrl = songUrl;
+        
+        if (!songUrl && song.song_id) {
+          try {
+            finalUrl = await getSongUrl(song);
+            setSongUrls(prev => new Map(prev).set(song.song_id!, finalUrl));
+          } catch (err) {
+            console.error(`Failed to get URL for song ${song.song_id}:`, err);
+            alert(`Cannot play song: ${err instanceof Error ? err.message : 'Song file not available'}`);
+            return;
+          }
+        }
+        
+        if (!finalUrl) {
+          alert('Cannot play song: Song file not available');
           return;
         }
+        
+        playTrack({
+          url: finalUrl,
+          title: song.title,
+          artist: song.artist_name || "",
+          album: song.album_title || "",
+          cover: song.cover_image || "",
+          songId: song.song_id,
+        });
       }
-      
-      if (!finalUrl) {
-        alert('Cannot play song: Song file not available');
-        return;
-      }
-      
-      playTrack({
-        url: finalUrl,
-        title: song.title,
-        artist: song.artist_name || "",
-        album: song.album_title || "",
-        cover: song.cover_image || "",
-        songId: song.song_id,
-      });
     } catch (err) {
       console.error('Error playing song:', err);
       alert(`Failed to play song: ${err instanceof Error ? err.message : 'Unknown error'}`);

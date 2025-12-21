@@ -18,13 +18,7 @@ interface Playlist {
   songs: SongWithRelations[];
 }
 
-function formatDuration(d: any): string {
-  if (typeof d === "string") return d;
-  const h = d.hours || 0;
-  const m = String(d.minutes || 0).padStart(2, "0");
-  const s = String(d.seconds || 0).padStart(2, "0");
-  return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
-}
+import { formatDuration } from "../utils/formatDuration";
 
 const PlaylistDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -114,7 +108,7 @@ const PlaylistDetail: React.FC = () => {
       })
     );
     setQueue(tracks);
-    if (tracks[0]) playTrack(tracks[0]);
+    if (tracks[0]) playTrack(tracks[0], 0);
   };
 
   const handlePlaySong = async (song: SongWithRelations) => {
@@ -133,15 +127,24 @@ const PlaylistDetail: React.FC = () => {
       })
     );
     setQueue(tracks);
-    const songUrl = await getSongUrl(song);
-    playTrack({
-      url: songUrl,
-      title: song.title,
-      artist: song.artist_name || "",
-      album: song.album_title || "",
-      cover: song.cover_image || "",
-      songId: song.song_id,
-    });
+    
+    // Find the index of the song being played in the queue
+    const songIndex = tracks.findIndex(t => t.songId === song.song_id);
+    
+    if (songIndex !== -1) {
+      playTrack(tracks[songIndex], songIndex);
+    } else {
+      // Fallback: play directly if not found in queue
+      const songUrl = await getSongUrl(song);
+      playTrack({
+        url: songUrl,
+        title: song.title,
+        artist: song.artist_name || "",
+        album: song.album_title || "",
+        cover: song.cover_image || "",
+        songId: song.song_id,
+      });
+    }
   };
 
   const handleRemoveSong = async (songId: number) => {

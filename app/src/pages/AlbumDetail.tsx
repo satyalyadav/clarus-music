@@ -9,20 +9,13 @@ import {
   getSongUrl,
   SongWithRelations,
 } from "../services/db";
+import { formatDuration } from "../utils/formatDuration";
 
 interface Album {
   album_id?: number;
   title: string;
   cover_image?: string | null;
   songs: SongWithRelations[];
-}
-
-function formatDuration(d: any): string {
-  if (typeof d === "string") return d;
-  const h = d.hours || 0;
-  const m = String(d.minutes || 0).padStart(2, "0");
-  const s = String(d.seconds || 0).padStart(2, "0");
-  return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
 }
 
 const AlbumDetail: React.FC = () => {
@@ -111,7 +104,7 @@ const AlbumDetail: React.FC = () => {
       })
     );
     setQueue(tracks);
-    if (tracks[0]) playTrack(tracks[0]);
+    if (tracks[0]) playTrack(tracks[0], 0);
   };
 
   const handlePlaySong = async (song: SongWithRelations) => {
@@ -130,15 +123,24 @@ const AlbumDetail: React.FC = () => {
       })
     );
     setQueue(tracks);
-    const songUrl = await getSongUrl(song);
-    playTrack({
-      url: songUrl,
-      title: song.title,
-      artist: song.artist_name || "",
-      album: album.title,
-      cover: song.cover_image || album.cover_image || "",
-      songId: song.song_id,
-    });
+    
+    // Find the index of the song being played in the queue
+    const songIndex = tracks.findIndex(t => t.songId === song.song_id);
+    
+    if (songIndex !== -1) {
+      playTrack(tracks[songIndex], songIndex);
+    } else {
+      // Fallback: play directly if not found in queue
+      const songUrl = await getSongUrl(song);
+      playTrack({
+        url: songUrl,
+        title: song.title,
+        artist: song.artist_name || "",
+        album: album.title,
+        cover: song.cover_image || album.cover_image || "",
+        songId: song.song_id,
+      });
+    }
   };
 
   if (loading) return <div className="loading">Loading album...</div>;

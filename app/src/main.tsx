@@ -4,7 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
-import { AudioPlayerProvider } from "./contexts/AudioPlayerContext";
+import { AudioPlayerProvider } from "./contexts/AudioPlayerProvider";
 import "./styles/global.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

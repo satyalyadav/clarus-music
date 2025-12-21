@@ -419,6 +419,7 @@ export interface SongWithRelations extends Song {
   // Backwards-compatible combined artist string for display
   artist_name?: string;
   album_title?: string;
+  album_cover_image?: string | null;
   genre_name?: string;
 }
 

@@ -10,20 +10,13 @@ import {
   SongWithRelations,
 } from "../services/db";
 import { artistImageService } from "../services/artistImageService";
+import { formatDuration } from "../utils/formatDuration";
 
 interface Artist {
   artist_id?: number;
   name: string;
   image_url?: string | null;
   songs: SongWithRelations[];
-}
-
-function formatDuration(d: any): string {
-  if (typeof d === "string") return d;
-  const h = d.hours || 0;
-  const m = String(d.minutes || 0).padStart(2, "0");
-  const s = String(d.seconds || 0).padStart(2, "0");
-  return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
 }
 
 const ArtistDetail: React.FC = () => {
@@ -132,7 +125,7 @@ const ArtistDetail: React.FC = () => {
       })
     );
     setQueue(tracks);
-    if (tracks[0]) playTrack(tracks[0]);
+    if (tracks[0]) playTrack(tracks[0], 0);
   };
 
   const handlePlaySong = async (song: SongWithRelations) => {
@@ -151,15 +144,24 @@ const ArtistDetail: React.FC = () => {
       })
     );
     setQueue(tracks);
-    const songUrl = await getSongUrl(song);
-    playTrack({
-      url: songUrl,
-      title: song.title,
-      artist: song.artist_name || artist.name,
-      album: song.album_title || "",
-      cover: song.cover_image || song.album_cover_image || "",
-      songId: song.song_id,
-    });
+    
+    // Find the index of the song being played in the queue
+    const songIndex = tracks.findIndex(t => t.songId === song.song_id);
+    
+    if (songIndex !== -1) {
+      playTrack(tracks[songIndex], songIndex);
+    } else {
+      // Fallback: play directly if not found in queue
+      const songUrl = await getSongUrl(song);
+      playTrack({
+        url: songUrl,
+        title: song.title,
+        artist: song.artist_name || artist.name,
+        album: song.album_title || "",
+        cover: song.cover_image || song.album_cover_image || "",
+        songId: song.song_id,
+      });
+    }
   };
 
   if (loading) return <div className="loading">Loading artist...</div>;
@@ -242,12 +244,27 @@ const ArtistDetail: React.FC = () => {
                               currentTrack?.artist === artist.name);
             const isCurrentPlaying = isCurrent && isPlaying;
 
+            const coverImage = song.cover_image || song.album_cover_image;
+
             return (
               <div 
                 key={song.song_id} 
                 className="list-item"
                 onClick={() => isCurrent ? togglePlayPause() : handlePlaySong(song)}
               >
+                {coverImage && (
+                  <img
+                    src={coverImage}
+                    alt={song.title}
+                    style={{
+                      width: "50px",
+                      height: "50px",
+                      objectFit: "cover",
+                      borderRadius: "4px",
+                      marginRight: "12px",
+                    }}
+                  />
+                )}
                 <div className="list-item-content">
                   <div
                     className={`list-item-title ${isCurrent ? "playing" : ""}`}
