@@ -18,8 +18,6 @@ interface Genre {
   songs: SongWithRelations[];
 }
 
-import { formatDuration } from "../utils/formatDuration";
-
 const GenreDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();

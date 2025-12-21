@@ -537,12 +537,18 @@ body {
 
 .audio-player-text {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 42px;
+  justify-content: center;
 }
 
 .audio-player-title-wrapper {
   overflow: hidden;
   width: 100%;
   position: relative;
+  height: 18px;
+  flex-shrink: 0;
 }
 
 .audio-player-title {
@@ -551,6 +557,7 @@ body {
   color: var(--text-primary);
   white-space: nowrap;
   display: inline-block;
+  line-height: 18px;
 }
 
 .audio-player-title.scroll {
@@ -575,9 +582,31 @@ body {
   animation-play-state: paused;
 }
 
+.audio-player-subtitle-wrapper {
+  overflow: hidden;
+  width: 100%;
+  position: relative;
+  height: 16px;
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+
 .audio-player-subtitle {
   font-size: 11px;
   color: var(--text-muted);
+  white-space: nowrap;
+  display: inline-block;
+  line-height: 16px;
+}
+
+.audio-player-subtitle.scroll {
+  animation: scroll-text 10s ease-in-out infinite;
+  padding-right: 30px;
+}
+
+/* Pause animation on hover for better readability */
+.audio-player-subtitle-wrapper:hover .audio-player-subtitle.scroll {
+  animation-play-state: paused;
 }
 
 .audio-player-main {
