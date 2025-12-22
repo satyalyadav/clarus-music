@@ -32,11 +32,10 @@ Everything is stored locally in your browser. Your music library is tied to the 
 2. **Install Dependencies**
 
    ```bash
-   cd app
    npm install
    ```
 
-   This will install frontend dependencies.
+   This will install both frontend and backend dependencies.
 
 3. **Configure Spotify API (Optional - for artist images)**
 
@@ -59,11 +58,13 @@ Everything is stored locally in your browser. Your music library is tied to the 
    npm run dev
    ```
 
-   This will start the Vite development server. Open your browser to the URL shown (typically `http://localhost:5173`).
+   This will start both the backend API server (on port 3000) and the Vite development server (on port 5173). Open your browser to the URL shown (typically `http://localhost:5173`).
+
+   **Note:** The backend server is required for Bandcamp URL metadata extraction. If you only need Apple Music search, you can run just the frontend with `npm run dev:frontend`.
 
 ## Usage
 
-1. **Add Songs**: Click "add song" and select audio files from your device
+1. **Add Songs**: Click "add song" and select audio files from your device. You can also paste Apple Music or Bandcamp URLs in the search field to automatically fill in song metadata (artist, album, cover art).
 2. **Organize**: Create albums, artists, genres, and playlists
 3. **Play Music**: Click any song to start playing
 4. **Enjoy**: Your library persists in your browser - no login needed!
@@ -82,6 +83,7 @@ npm run build
 - **Routing**: React Router
 - **State Management**: React Context API
 - **External APIs**: Spotify Web API (for artist images), iTunes Search API (for song search)
+- **Backend**: Express.js server for Bandcamp metadata extraction and audio streaming (runs on port 3000)
 
 ## Browser Compatibility
 

@@ -10,6 +10,7 @@ export interface Song {
   duration: string; // HH:MM:SS format
   file_blob?: Blob; // Audio file stored as Blob
   file_handle?: FileSystemFileHandle; // Alternative: File System Access API handle
+  url?: string | null; // External URL (e.g., Bandcamp stream URL)
   cover_image?: string | null;
   created_at?: number; // Timestamp
 }
@@ -86,6 +87,11 @@ class MusicLibraryDB extends Dexie {
     this.version(3).stores({
       artists: '++artist_id, name, image_url, created_at',
     });
+
+    // Add url field to songs in version 4 (url is not indexed, just a field)
+    this.version(4).stores({
+      songs: '++song_id, title, artist_id, album_id, genre_id, created_at',
+    });
   }
 }
 
@@ -124,6 +130,18 @@ export const songService = {
     const albumId = song.album_id;
     const genreId = song.genre_id;
 
+    // Get all artist IDs associated with this song (primary + secondary/featured)
+    const associatedArtistIds = new Set<number>();
+    if (artistId) {
+      associatedArtistIds.add(artistId);
+    }
+    const songArtistRows = await db.songArtists.where('song_id').equals(id).toArray();
+    songArtistRows.forEach(row => {
+      if (row.artist_id) {
+        associatedArtistIds.add(row.artist_id);
+      }
+    });
+
     // Remove from playlists, song-artist mappings, and delete the song
     await db.playlistSongs.where('song_id').equals(id).delete();
     await db.songArtists.where('song_id').equals(id).delete();
@@ -132,19 +150,22 @@ export const songService = {
     // Cascade delete: Check if artist, album, or genre should be deleted
     // (only if no other songs reference them)
 
-    // Check and delete artist if no songs remain
-    if (artistId) {
-      const remainingSongsForArtist = await db.songs.where('artist_id').equals(artistId).count();
-      if (remainingSongsForArtist === 0) {
+    // Check and delete all associated artists if no songs remain
+    for (const associatedArtistId of associatedArtistIds) {
+      // Check both primary artist_id and songArtists join table
+      const remainingSongsAsPrimary = await db.songs.where('artist_id').equals(associatedArtistId).count();
+      const remainingSongsAsSecondary = await db.songArtists.where('artist_id').equals(associatedArtistId).count();
+      
+      if (remainingSongsAsPrimary === 0 && remainingSongsAsSecondary === 0) {
         // Delete albums by this artist first (they won't have songs anymore)
-        const albums = await db.albums.where('artist_id').equals(artistId).toArray();
+        const albums = await db.albums.where('artist_id').equals(associatedArtistId).toArray();
         for (const album of albums) {
           if (album.album_id) {
             await db.albums.delete(album.album_id);
           }
         }
         // Delete the artist
-        await db.artists.delete(artistId);
+        await db.artists.delete(associatedArtistId);
       }
     }
 
@@ -488,8 +509,18 @@ export async function getSongsWithRelations(): Promise<SongWithRelations[]> {
   }));
 }
 
-// Helper function to create object URL from song file
+// Helper function to create object URL from song file or return external URL
 export async function getSongUrl(song: Song): Promise<string> {
+  // If song has an external URL (e.g., Bandcamp), proxy it through backend to avoid CORS
+  if (song.url) {
+    // If it's a Bandcamp audio URL (bcbits.com is Bandcamp's CDN), use the proxy endpoint
+    if (song.url.includes('bcbits.com') || song.url.includes('bandcamp.com')) {
+      return `/api/bandcamp-audio-proxy?url=${encodeURIComponent(song.url)}`;
+    }
+    // Otherwise return as-is (might be a direct audio URL)
+    return song.url;
+  }
+  
   if (song.file_blob) {
     return URL.createObjectURL(song.file_blob);
   }
@@ -500,7 +531,7 @@ export async function getSongUrl(song: Song): Promise<string> {
     return URL.createObjectURL(file);
   }
   
-  throw new Error('Song has no file data');
+  throw new Error('Song has no file data or URL');
 }
 
 // Helper function to revoke object URL

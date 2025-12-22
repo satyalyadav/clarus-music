@@ -25,8 +25,21 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
       }
 
       if (currentTrack?.url !== track.url) {
+        // For external URLs (like Bandcamp), we might need to set crossOrigin
+        if (track.url.startsWith('http://') || track.url.startsWith('https://')) {
+          // Try anonymous crossOrigin for external URLs
+          audioRef.current.crossOrigin = 'anonymous';
+        } else {
+          audioRef.current.crossOrigin = null;
+        }
+        
         audioRef.current.src = track.url;
         setCurrentTrack(track);
+        
+        // Log for debugging (development only)
+        if (import.meta.env.DEV) {
+          console.log('Setting audio source:', track.url);
+        }
 
         // Find index in queue - prefer songId matching over URL matching for reliability
         let idx = -1;
@@ -119,20 +132,38 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
   useEffect(() => {
     const audio = audioRef.current;
     const onTimeUpdate = () => setCurrentTime(audio.currentTime);
-    const onLoadedMeta = () => setDuration(audio.duration);
+    const onLoadedMeta = () => {
+      setDuration(audio.duration);
+      if (import.meta.env.DEV) {
+        console.log('Audio metadata loaded. Duration:', audio.duration, 'URL:', audio.src);
+      }
+    };
     const onEnded = () => {
       setIsPlaying(false);
       playNext();
+    };
+    const onError = (e: Event) => {
+      console.error('Audio error:', e, 'URL:', audio.src, 'Error code:', (audio as any).error?.code);
+      setIsPlaying(false);
+    };
+    const onCanPlay = () => {
+      if (import.meta.env.DEV) {
+        console.log('Audio can play:', audio.src);
+      }
     };
 
     audio.addEventListener("timeupdate", onTimeUpdate);
     audio.addEventListener("loadedmetadata", onLoadedMeta);
     audio.addEventListener("ended", onEnded);
+    audio.addEventListener("error", onError);
+    audio.addEventListener("canplay", onCanPlay);
 
     return () => {
       audio.removeEventListener("timeupdate", onTimeUpdate);
       audio.removeEventListener("loadedmetadata", onLoadedMeta);
       audio.removeEventListener("ended", onEnded);
+      audio.removeEventListener("error", onError);
+      audio.removeEventListener("canplay", onCanPlay);
     };
   }, [currentIndex, queue]);
 

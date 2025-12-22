@@ -27,6 +27,7 @@ const SongCreate: React.FC = () => {
   const [artistId, setArtistId] = useState("");
   const [genreId, setGenreId] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [songUrl, setSongUrl] = useState<string>(""); // For Bandcamp/external URLs
   const [duration, setDuration] = useState<string>("");
   const [coverImage, setCoverImage] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +72,49 @@ const SongCreate: React.FC = () => {
       );
     });
   }, []);
+
+  // Check if input is a Bandcamp URL
+  const isBandcampUrl = (url: string): boolean => {
+    return /bandcamp\.com/.test(url.trim());
+  };
+
+  // Extract Bandcamp metadata from backend
+  const extractBandcampMetadata = async (
+    url: string
+  ): Promise<SearchResult | null> => {
+    try {
+      const response = await fetch(
+        `/api/bandcamp-metadata?url=${encodeURIComponent(url)}`
+      );
+      if (!response.ok) {
+        const errorData = await response
+          .json()
+          .catch(() => ({ error: response.statusText }));
+        throw new Error(
+          errorData.error ||
+            `Failed to fetch Bandcamp metadata: ${response.statusText}`
+        );
+      }
+      const data = await response.json();
+
+      return {
+        title: data.title || "",
+        album: data.album || "",
+        artist: data.artist || "",
+        genre: data.genre || "",
+        coverArt: data.coverArt || "",
+        raw: {
+          ...data,
+          url, // Original page URL
+          audioUrl: data.audioUrl || null, // Actual audio stream URL (may be null if extraction failed)
+          duration: data.duration || null,
+        },
+      };
+    } catch (error: any) {
+      console.error("Error extracting Bandcamp metadata:", error);
+      throw error;
+    }
+  };
 
   // Extract Apple Music track ID from various formats
   const extractAppleMusicTrackId = (query: string): string | null => {
@@ -139,6 +183,33 @@ const SongCreate: React.FC = () => {
 
     const trimmedQuery = searchQuery.trim();
 
+    // Check if it's a Bandcamp URL
+    if (isBandcampUrl(trimmedQuery)) {
+      searchTimeoutRef.current = setTimeout(async () => {
+        setSearchLoading(true);
+        setError(null);
+        try {
+          const result = await extractBandcampMetadata(trimmedQuery);
+          if (result) {
+            setSearchResults([result]);
+            setShowResults(true);
+          } else {
+            setSearchResults([]);
+            setError("Could not extract metadata from Bandcamp URL");
+          }
+        } catch (err: any) {
+          console.error("Bandcamp extraction error:", err);
+          setError(
+            err.message || "Failed to extract metadata from Bandcamp URL"
+          );
+          setSearchResults([]);
+        } finally {
+          setSearchLoading(false);
+        }
+      }, 500);
+      return;
+    }
+
     // Allow lookup even with just an ID (no minimum length)
     const appleId = extractAppleMusicTrackId(trimmedQuery);
     const isLookup = appleId !== null;
@@ -151,6 +222,7 @@ const SongCreate: React.FC = () => {
 
     searchTimeoutRef.current = setTimeout(async () => {
       setSearchLoading(true);
+      setError(null);
       try {
         let url: string;
 
@@ -234,6 +306,52 @@ const SongCreate: React.FC = () => {
     setTitle(result.title || "");
     setCoverImage(result.coverArt || "");
 
+    // If this is a Bandcamp result, store the audio stream URL (prefer audioUrl over page URL)
+    if (result.raw?.url && isBandcampUrl(result.raw.url)) {
+      // Use audioUrl if available (actual stream URL), otherwise we can't play it
+      const audioStreamUrl = result.raw.audioUrl;
+
+      // Validate that we got a REAL audio URL (should be from bcbits.com CDN or contain .mp3/.ogg/.flac)
+      const isValidAudioUrl =
+        audioStreamUrl &&
+        (audioStreamUrl.includes("bcbits.com") ||
+          audioStreamUrl.includes(".mp3") ||
+          audioStreamUrl.includes(".ogg") ||
+          audioStreamUrl.includes(".flac"));
+
+      if (isValidAudioUrl) {
+        setSongUrl(audioStreamUrl);
+        setFile(null); // Clear file when URL is set
+        if (import.meta.env.DEV) {
+          console.log("Stored valid Bandcamp audio URL:", audioStreamUrl);
+        }
+      } else {
+        // If we couldn't extract a valid audio URL, show an error
+        setError(
+          "Could not extract audio stream URL from Bandcamp. Unfortunately, this track may not be available for streaming. Please try uploading an audio file instead."
+        );
+        setSongUrl(""); // Don't store invalid URL
+        if (import.meta.env.DEV) {
+          console.warn(
+            "Failed to extract valid audio URL from Bandcamp page. Got:",
+            audioStreamUrl,
+            "Page URL:",
+            result.raw.url
+          );
+        }
+      }
+
+      // Set duration if available from Bandcamp metadata
+      if (result.raw.duration) {
+        setDuration(result.raw.duration);
+        if (import.meta.env.DEV) {
+          console.log("Extracted duration:", result.raw.duration);
+        }
+      }
+    } else {
+      setSongUrl(""); // Clear URL for non-Bandcamp results
+    }
+
     try {
       // Parse all artist names (main + featured)
       const mainArtistNames = splitArtistNames(result.artist || "");
@@ -313,8 +431,10 @@ const SongCreate: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file) {
-      setError("Please select an audio file");
+
+    // Require either file or URL
+    if (!file && !songUrl) {
+      setError("Please select an audio file or provide a Bandcamp URL");
       return;
     }
 
@@ -333,7 +453,21 @@ const SongCreate: React.FC = () => {
       return;
     }
 
-    if (!duration) {
+    // Duration is only required for file uploads
+    // For URL-based songs, try to get it from metadata or set a default
+    let finalDuration = duration;
+    if (!finalDuration && songUrl) {
+      // Try to get duration from search result if available
+      const bandcampResult = searchResults.find(
+        (r) => r.raw?.audioUrl === songUrl || r.raw?.url
+      );
+      if (bandcampResult?.raw?.duration) {
+        finalDuration = bandcampResult.raw.duration;
+      } else {
+        // Set a default duration for URL-based songs (can be updated later)
+        finalDuration = "00:00:00";
+      }
+    } else if (!finalDuration && file) {
       setError(
         "Duration could not be extracted from the audio file. Please try again."
       );
@@ -344,15 +478,14 @@ const SongCreate: React.FC = () => {
     setLoading(true);
 
     try {
-      // Read file as Blob
-      if (!file) {
-        throw new Error("File is required");
-      }
+      let fileBlob: Blob | undefined = undefined;
 
-      // Store file as Blob in IndexedDB
-      const fileBlob = await file
-        .arrayBuffer()
-        .then((buf) => new Blob([buf], { type: file.type }));
+      // Read file as Blob if file is provided
+      if (file) {
+        fileBlob = await file
+          .arrayBuffer()
+          .then((buf) => new Blob([buf], { type: file.type }));
+      }
 
       // Create song in IndexedDB
       const newSongId = await songService.create({
@@ -360,8 +493,9 @@ const SongCreate: React.FC = () => {
         artist_id: parseInt(artistId),
         genre_id: parseInt(genreId),
         album_id: albumId ? parseInt(albumId) : null,
-        duration: duration,
+        duration: finalDuration,
         file_blob: fileBlob,
+        url: songUrl || null,
         cover_image: coverImage || null,
       });
 
@@ -394,76 +528,127 @@ const SongCreate: React.FC = () => {
       <form onSubmit={handleSubmit}>
         <div className="form-group">
           <label className="form-label">//audio file</label>
-          <div className="file-input-row">
-            <label className="btn btn-primary file-input-button">
-              choose file
-              <input
-                type="file"
-                accept="audio/*"
-                onChange={async (e) => {
-                  const selectedFile = e.target.files?.[0] || null;
-                  setFile(selectedFile);
-
-                  // Extract duration from audio file
-                  if (selectedFile) {
-                    try {
-                      const audio = new Audio();
-                      const objectUrl = URL.createObjectURL(selectedFile);
-                      audio.src = objectUrl;
-
-                      await new Promise((resolve, reject) => {
-                        audio.addEventListener("loadedmetadata", () => {
-                          const durationSeconds = Math.floor(audio.duration);
-                          const hours = Math.floor(durationSeconds / 3600);
-                          const minutes = Math.floor(
-                            (durationSeconds % 3600) / 60
-                          );
-                          const seconds = durationSeconds % 60;
-
-                          // Format as PostgreSQL interval: Always use HH:MM:SS format to avoid ambiguity
-                          // PostgreSQL interprets MM:SS as hours:minutes, so we use 00:MM:SS for songs under 1 hour
-                          const durationStr = `${String(hours).padStart(
-                            2,
-                            "0"
-                          )}:${String(minutes).padStart(2, "0")}:${String(
-                            seconds
-                          ).padStart(2, "0")}`;
-
-                          setDuration(durationStr);
-                          URL.revokeObjectURL(objectUrl);
-                          resolve(null);
-                        });
-                        audio.addEventListener("error", reject);
-                      });
-                    } catch (err) {
-                      console.error("Error extracting duration:", err);
-                      setDuration("");
-                      setError(
-                        "Failed to extract duration from audio file. Please try another file."
-                      );
-                    }
-                  } else {
-                    setDuration("");
-                  }
-                }}
-                required
-              />
-            </label>
-            <div className="file-input-name">
-              {file ? file.name : "no file selected"}
-            </div>
-          </div>
-          {duration && (
+          {songUrl ? (
             <div
               style={{
-                marginTop: "4px",
-                fontSize: "0.9em",
-                color: "var(--text-muted)",
+                padding: "12px",
+                backgroundColor: "var(--card-bg)",
+                borderRadius: "4px",
+                border: "1px solid var(--border-color)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
               }}
             >
-              Duration: {duration}
+              <div
+                style={{
+                  fontSize: "0.9em",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                Using Bandcamp stream
+              </div>
+              <button
+                type="button"
+                className="btn btn-small"
+                onClick={() => {
+                  setSongUrl("");
+                  setFile(null);
+                }}
+              >
+                Clear
+              </button>
             </div>
+          ) : (
+            <>
+              <div className="file-input-row">
+                <label className="btn btn-primary file-input-button">
+                  choose file
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    onChange={async (e) => {
+                      const selectedFile = e.target.files?.[0] || null;
+                      setFile(selectedFile);
+
+                      // Clear URL when file is selected
+                      if (selectedFile) {
+                        setSongUrl("");
+                      }
+
+                      // Extract duration from audio file
+                      if (selectedFile) {
+                        try {
+                          const audio = new Audio();
+                          const objectUrl = URL.createObjectURL(selectedFile);
+                          audio.src = objectUrl;
+
+                          await new Promise((resolve, reject) => {
+                            audio.addEventListener("loadedmetadata", () => {
+                              const durationSeconds = Math.floor(
+                                audio.duration
+                              );
+                              const hours = Math.floor(durationSeconds / 3600);
+                              const minutes = Math.floor(
+                                (durationSeconds % 3600) / 60
+                              );
+                              const seconds = durationSeconds % 60;
+
+                              // Format as PostgreSQL interval: Always use HH:MM:SS format to avoid ambiguity
+                              // PostgreSQL interprets MM:SS as hours:minutes, so we use 00:MM:SS for songs under 1 hour
+                              const durationStr = `${String(hours).padStart(
+                                2,
+                                "0"
+                              )}:${String(minutes).padStart(2, "0")}:${String(
+                                seconds
+                              ).padStart(2, "0")}`;
+
+                              setDuration(durationStr);
+                              URL.revokeObjectURL(objectUrl);
+                              resolve(null);
+                            });
+                            audio.addEventListener("error", reject);
+                          });
+                        } catch (err) {
+                          console.error("Error extracting duration:", err);
+                          setDuration("");
+                          setError(
+                            "Failed to extract duration from audio file. Please try another file."
+                          );
+                        }
+                      } else {
+                        setDuration("");
+                      }
+                    }}
+                  />
+                </label>
+                <div className="file-input-name">
+                  {file ? file.name : "no file selected"}
+                </div>
+              </div>
+              {duration && (
+                <div
+                  style={{
+                    marginTop: "4px",
+                    fontSize: "0.9em",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  Duration: {duration}
+                </div>
+              )}
+            </>
           )}
+          <div
+            style={{
+              marginTop: "8px",
+              fontSize: "0.85em",
+              color: "var(--text-muted)",
+              fontStyle: "italic",
+            }}
+          >
+            {songUrl ? "" : "Or paste a Bandcamp URL in the search field above"}
+          </div>
         </div>
 
         <div
@@ -477,7 +662,7 @@ const SongCreate: React.FC = () => {
             className="form-input"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="type song name or paste Apple Music link..."
+            placeholder="type song name or paste Apple Music / Bandcamp link..."
             onFocus={() => searchResults.length > 0 && setShowResults(true)}
           />
           <div
