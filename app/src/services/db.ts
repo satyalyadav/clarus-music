@@ -508,6 +508,149 @@ export function revokeSongUrl(url: string): void {
   URL.revokeObjectURL(url);
 }
 
+// Search function to search through songs
+export async function searchSongs(query: string): Promise<SongWithRelations[]> {
+  if (!query || query.trim().length === 0) {
+    return [];
+  }
+
+  const searchTerm = query.toLowerCase().trim();
+  const allSongs = await getSongsWithRelations();
+
+  return allSongs.filter(song => {
+    // Search in title
+    if (song.title.toLowerCase().includes(searchTerm)) {
+      return true;
+    }
+
+    // Search in artist name(s)
+    if (song.artist_name && song.artist_name.toLowerCase().includes(searchTerm)) {
+      return true;
+    }
+    if (song.artist_names && song.artist_names.some(name => name.toLowerCase().includes(searchTerm))) {
+      return true;
+    }
+
+    // Search in album title
+    if (song.album_title && song.album_title.toLowerCase().includes(searchTerm)) {
+      return true;
+    }
+
+    // Search in genre
+    if (song.genre_name && song.genre_name.toLowerCase().includes(searchTerm)) {
+      return true;
+    }
+
+    return false;
+  });
+}
+
+// Unified search result types
+export type SearchResultType = 'song' | 'album' | 'artist' | 'genre' | 'playlist';
+
+export interface SearchResult {
+  type: SearchResultType;
+  id?: number;
+  title: string;
+  subtitle?: string;
+  image?: string | null;
+  // For songs
+  song?: SongWithRelations;
+  // For albums
+  album?: Album;
+  // For artists
+  artist?: Artist;
+  // For genres
+  genre?: Genre;
+  // For playlists
+  playlist?: Playlist;
+}
+
+// Comprehensive search function across all entity types
+export async function searchAll(query: string): Promise<SearchResult[]> {
+  if (!query || query.trim().length === 0) {
+    return [];
+  }
+
+  const searchTerm = query.toLowerCase().trim();
+  const results: SearchResult[] = [];
+
+  // Search songs
+  const songs = await searchSongs(query);
+  songs.forEach(song => {
+    results.push({
+      type: 'song',
+      id: song.song_id,
+      title: song.title,
+      subtitle: `${song.artist_name || 'Unknown Artist'}${song.album_title ? ` • ${song.album_title}` : ''}`,
+      image: song.cover_image,
+      song,
+    });
+  });
+
+  // Search albums
+  const albums = await albumService.getAll();
+  albums.forEach(album => {
+    if (album.title.toLowerCase().includes(searchTerm)) {
+      results.push({
+        type: 'album',
+        id: album.album_id,
+        title: album.title,
+        subtitle: 'album',
+        image: album.cover_image,
+        album,
+      });
+    }
+  });
+
+  // Search artists
+  const artists = await artistService.getAll();
+  artists.forEach(artist => {
+    if (artist.name.toLowerCase().includes(searchTerm)) {
+      results.push({
+        type: 'artist',
+        id: artist.artist_id,
+        title: artist.name,
+        subtitle: 'artist',
+        image: artist.image_url,
+        artist,
+      });
+    }
+  });
+
+  // Search genres
+  const genres = await genreService.getAll();
+  genres.forEach(genre => {
+    if (genre.name.toLowerCase().includes(searchTerm)) {
+      results.push({
+        type: 'genre',
+        id: genre.genre_id,
+        title: genre.name,
+        subtitle: 'genre',
+        image: null,
+        genre,
+      });
+    }
+  });
+
+  // Search playlists
+  const playlists = await playlistService.getAll();
+  playlists.forEach(playlist => {
+    if (playlist.title.toLowerCase().includes(searchTerm)) {
+      results.push({
+        type: 'playlist',
+        id: playlist.playlist_id,
+        title: playlist.title,
+        subtitle: 'playlist',
+        image: playlist.cover_image,
+        playlist,
+      });
+    }
+  });
+
+  return results;
+}
+
 export default db;
 
 

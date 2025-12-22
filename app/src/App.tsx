@@ -15,6 +15,7 @@ import PlaylistList from "./pages/PlaylistList";
 import PlaylistCreate from "./pages/PlaylistCreate";
 import PlaylistDetail from "./pages/PlaylistDetail";
 import PlaylistEdit from "./pages/PlaylistEdit";
+import SearchResults from "./pages/SearchResults";
 
 const App: React.FC = () => {
   return (
@@ -37,6 +38,8 @@ const App: React.FC = () => {
         <Route path="/playlists/new" element={<PlaylistCreate />} />
         <Route path="/playlists/:id" element={<PlaylistDetail />} />
         <Route path="/playlists/:id/edit" element={<PlaylistEdit />} />
+
+        <Route path="/search" element={<SearchResults />} />
 
         {/* Default redirect */}
         <Route path="/" element={<Navigate to="/songs" replace />} />

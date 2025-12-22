@@ -2,6 +2,7 @@ import React, { ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext";
 import AudioPlayer from "./AudioPlayer";
+import SearchBar from "./SearchBar";
 
 interface LayoutProps {
   children: ReactNode;
@@ -21,6 +22,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           </span>
           <span className="header-title-hover">your music, local first</span>
         </div>
+        <SearchBar />
         <div className="header-spacer" />
         <button
           className="theme-toggle"
