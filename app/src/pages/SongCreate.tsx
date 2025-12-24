@@ -1293,67 +1293,130 @@ const SongCreate: React.FC = () => {
           </div>
         )}
 
-        <div className="form-group">
-          <label className="form-label">//title</label>
-          <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-            {coverImage && (
-              <img
-                src={coverImage}
-                alt="Cover"
-                style={{
-                  width: "60px",
-                  height: "60px",
-                  objectFit: "cover",
-                  borderRadius: "4px",
-                  flexShrink: 0,
-                }}
-              />
-            )}
-            <input
-              type="text"
-              className="form-input"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="song title"
-              required
-              style={{ flex: 1 }}
-            />
-          </div>
-        </div>
+        {addMode === "upload" ? (
+          <>
+            <div className="form-group">
+              <label className="form-label">//title</label>
+              <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+                {coverImage && (
+                  <img
+                    src={coverImage}
+                    alt="Cover"
+                    style={{
+                      width: "60px",
+                      height: "60px",
+                      objectFit: "cover",
+                      borderRadius: "4px",
+                      flexShrink: 0,
+                    }}
+                  />
+                )}
+                <input
+                  type="text"
+                  className="form-input"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="song title"
+                  required
+                  style={{ flex: 1 }}
+                />
+              </div>
+            </div>
 
-        <div className="form-row">
-          <div className="form-group">
-            <label className="form-label">//album</label>
-            <select
-              className="form-input"
-              value={albumId}
-              onChange={(e) => setAlbumId(e.target.value)}
-            >
-              <option value="">select album</option>
-              {albums.map((a) => (
-                <option key={a.album_id} value={a.album_id}>
-                  {a.title}
-                </option>
-              ))}
-            </select>
-          </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">//album</label>
+                <select
+                  className="form-input"
+                  value={albumId}
+                  onChange={(e) => setAlbumId(e.target.value)}
+                >
+                  <option value="">select album</option>
+                  {albums.map((a) => (
+                    <option key={a.album_id} value={a.album_id}>
+                      {a.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          <div className="form-group">
-            <label className="form-label">//artist</label>
-            <select
-              className="form-input"
-              value={artistId}
-              onChange={(e) => setArtistId(e.target.value)}
+              <div className="form-group">
+                <label className="form-label">//artist</label>
+                <select
+                  className="form-input"
+                  value={artistId}
+                  onChange={(e) => setArtistId(e.target.value)}
+                >
+                  <option value="">select artist</option>
+                  {artists.map((a) => (
+                    <option key={a.artist_id} value={a.artist_id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </>
+        ) : (
+          // Bandcamp mode: show metadata preview
+          songUrl && (
+            <div
+              style={{
+                padding: "16px",
+                backgroundColor: "var(--card-bg)",
+                borderRadius: "4px",
+                border: "1px solid var(--border-color)",
+                marginBottom: "16px",
+              }}
             >
-              <option value="">select artist</option>
-              {artists.map((a) => (
-                <option key={a.artist_id} value={a.artist_id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+              <div style={{ display: "flex", gap: "16px" }}>
+                {coverImage && (
+                  <img
+                    src={coverImage}
+                    alt="Cover"
+                    style={{
+                      width: "80px",
+                      height: "80px",
+                      objectFit: "cover",
+                      borderRadius: "4px",
+                      flexShrink: 0,
+                    }}
+                  />
+                )}
+                <div style={{ flex: 1 }}>
+                  <div
+                    style={{
+                      fontWeight: "bold",
+                      fontSize: "1.1em",
+                      color: "var(--text-primary)",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    {title || "Unknown"}
+                  </div>
+                  <div
+                    style={{
+                      color: "var(--text-secondary)",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    {artists.find((a) => a.artist_id?.toString() === artistId)?.name || "Unknown Artist"}
+                  </div>
+                  {albums.find((a) => a.album_id?.toString() === albumId) && (
+                    <div
+                      style={{
+                        color: "var(--text-muted)",
+                        fontSize: "0.9em",
+                      }}
+                    >
+                      {albums.find((a) => a.album_id?.toString() === albumId)?.title}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        )}
 
         <div className="form-group">
           <label className="form-label">//genre</label>
@@ -1361,6 +1424,7 @@ const SongCreate: React.FC = () => {
             className="form-input"
             value={genreId}
             onChange={(e) => setGenreId(e.target.value)}
+            required={addMode === "bandcamp"}
           >
             <option value="">select genre</option>
             {genres.map((g) => (
@@ -1373,7 +1437,13 @@ const SongCreate: React.FC = () => {
 
         <div style={{ display: "flex", gap: "12px", marginTop: "24px" }}>
           <button type="submit" className="btn btn-primary" disabled={loading}>
-            {loading ? "uploading..." : "create song"}
+            {loading
+              ? addMode === "bandcamp"
+                ? "adding..."
+                : "uploading..."
+              : addMode === "bandcamp"
+              ? "add song"
+              : "create song"}
           </button>
           <button
             type="button"
