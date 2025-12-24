@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
-import { getSongsWithRelations, getSongUrl, revokeSongUrl } from "../services/db";
+import { getSongsWithRelations, getSongUrl, revokeSongUrl, songService } from "../services/db";
 import { formatDuration } from "../utils/formatDuration";
 
 interface Song {
@@ -20,6 +20,9 @@ const SongList: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [songUrls, setSongUrls] = useState<Map<number, string>>(new Map());
+  const [selectedSongs, setSelectedSongs] = useState<Set<number>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
   const { playTrack, currentTrack, isPlaying, setQueue, togglePlayPause } =
     useAudioPlayer();
@@ -113,6 +116,92 @@ const SongList: React.FC = () => {
     }
   };
 
+  const toggleSongSelection = (songId: number | undefined, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    if (!songId) return;
+    setSelectedSongs((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(songId)) {
+        newSet.delete(songId);
+      } else {
+        newSet.add(songId);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedSongs.size === songs.length) {
+      setSelectedSongs(new Set());
+    } else {
+      const allIds = new Set(songs.map((s) => s.song_id).filter((id): id is number => !!id));
+      setSelectedSongs(allIds);
+    }
+  };
+
+  const toggleSelectionMode = () => {
+    if (selectionMode) {
+      // Exiting selection mode - clear selections
+      setSelectedSongs(new Set());
+    }
+    setSelectionMode(!selectionMode);
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedSongs.size === 0) return;
+    
+    const count = selectedSongs.size;
+    const confirmMessage = `Are you sure you want to delete ${count} song${count !== 1 ? "s" : ""}? This action cannot be undone.`;
+    
+    if (!window.confirm(confirmMessage)) return;
+
+    setDeleting(true);
+    setError(null);
+
+    try {
+      // Delete all selected songs
+      const deletePromises = Array.from(selectedSongs).map((songId) =>
+        songService.delete(songId).catch((err) => {
+          console.error(`Failed to delete song ${songId}:`, err);
+          return { error: true, songId };
+        })
+      );
+
+      const results = await Promise.all(deletePromises);
+      const errors = results.filter((r) => r && typeof r === "object" && "error" in r);
+
+      if (errors.length > 0) {
+        setError(`Failed to delete ${errors.length} song(s). Please try again.`);
+      }
+
+      // Clear selection, exit selection mode, and reload songs
+      setSelectedSongs(new Set());
+      setSelectionMode(false);
+      const songsData = await getSongsWithRelations();
+      setSongs(songsData);
+
+      // Recreate URLs for remaining songs
+      const urlMap = new Map<number, string>();
+      for (const song of songsData) {
+        if (song.song_id) {
+          try {
+            const url = await getSongUrl(song);
+            urlMap.set(song.song_id, url);
+          } catch (err) {
+            console.error(`Failed to create URL for song ${song.song_id}:`, err);
+          }
+        }
+      }
+      setSongUrls(urlMap);
+    } catch (err: any) {
+      setError(err.message || "Failed to delete songs");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const handlePlaySong = async (song: Song) => {
     try {
       const tracks = await Promise.all(
@@ -203,17 +292,54 @@ const SongList: React.FC = () => {
     <div>
       <h1 className="section-title">songs</h1>
 
-      <div style={{ display: "flex", gap: "12px", marginBottom: "24px" }}>
+      <div style={{ display: "flex", gap: "12px", marginBottom: "24px", flexWrap: "wrap", alignItems: "center" }}>
         <button
           className="btn btn-primary"
           onClick={handlePlayAll}
-          disabled={songs.length === 0}
+          disabled={songs.length === 0 || selectionMode}
         >
           ▶ play all
         </button>
-        <button className="btn" onClick={() => navigate("/songs/new")}>
+        <button 
+          className="btn" 
+          onClick={() => navigate("/songs/new")}
+          disabled={selectionMode}
+        >
           + add song
         </button>
+        {songs.length > 0 && (
+          <>
+            <button
+              className={selectionMode ? "btn btn-primary" : "btn"}
+              onClick={toggleSelectionMode}
+            >
+              {selectionMode ? "cancel" : "select"}
+            </button>
+            {selectionMode && (
+              <>
+                <button
+                  className="btn"
+                  onClick={toggleSelectAll}
+                >
+                  {selectedSongs.size === songs.length ? "deselect all" : "select all"}
+                </button>
+                {selectedSongs.size > 0 && (
+                  <button
+                    className="btn"
+                    onClick={handleBulkDelete}
+                    disabled={deleting}
+                    style={{ 
+                      backgroundColor: "var(--error-color, #dc3545)",
+                      color: "white"
+                    }}
+                  >
+                    {deleting ? "deleting..." : `delete ${selectedSongs.size} song${selectedSongs.size !== 1 ? "s" : ""}`}
+                  </button>
+                )}
+              </>
+            )}
+          </>
+        )}
       </div>
 
       {songs.length === 0 ? (
@@ -236,12 +362,38 @@ const SongList: React.FC = () => {
                              (song.song_id && songUrls.get(song.song_id) && currentTrack?.url === songUrls.get(song.song_id));
             const isCurrentPlaying = isCurrent && isPlaying;
 
+            const isSelected = song.song_id ? selectedSongs.has(song.song_id) : false;
+
             return (
               <div 
                 key={song.song_id} 
                 className="list-item"
-                onClick={() => isCurrent ? togglePlayPause() : handlePlaySong(song)}
+                onClick={() => {
+                  if (selectionMode) {
+                    toggleSongSelection(song.song_id);
+                  } else {
+                    isCurrent ? togglePlayPause() : handlePlaySong(song);
+                  }
+                }}
+                style={{
+                  backgroundColor: isSelected ? "var(--button-hover, rgba(0,0,0,0.05))" : undefined,
+                  cursor: selectionMode ? "pointer" : undefined,
+                }}
               >
+                {selectionMode && (
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleSongSelection(song.song_id)}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      marginRight: "12px",
+                      cursor: "pointer",
+                      width: "18px",
+                      height: "18px",
+                    }}
+                  />
+                )}
                 {song.cover_image && (
                   <img
                     src={song.cover_image}
@@ -266,14 +418,16 @@ const SongList: React.FC = () => {
                     {formatDuration(song.duration)}
                   </div>
                 </div>
-                <div className="list-item-actions" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    className="btn btn-small"
-                    onClick={() => navigate(`/songs/${song.song_id}/edit`)}
-                  >
-                    edit
-                  </button>
-                </div>
+                {!selectionMode && (
+                  <div className="list-item-actions" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      className="btn btn-small"
+                      onClick={() => navigate(`/songs/${song.song_id}/edit`)}
+                    >
+                      edit
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}

@@ -11,6 +11,7 @@ export interface Song {
   file_blob?: Blob; // Audio file stored as Blob
   file_handle?: FileSystemFileHandle; // Alternative: File System Access API handle
   url?: string | null; // External URL (e.g., Bandcamp stream URL)
+  bandcamp_page_url?: string | null; // Original Bandcamp page URL for refreshing expired audio URLs
   cover_image?: string | null;
   created_at?: number; // Timestamp
 }
@@ -90,6 +91,11 @@ class MusicLibraryDB extends Dexie {
 
     // Add url field to songs in version 4 (url is not indexed, just a field)
     this.version(4).stores({
+      songs: '++song_id, title, artist_id, album_id, genre_id, created_at',
+    });
+
+    // Add bandcamp_page_url field to songs in version 5
+    this.version(5).stores({
       songs: '++song_id, title, artist_id, album_id, genre_id, created_at',
     });
   }
@@ -515,7 +521,12 @@ export async function getSongUrl(song: Song): Promise<string> {
   if (song.url) {
     // If it's a Bandcamp audio URL (bcbits.com is Bandcamp's CDN), use the proxy endpoint
     if (song.url.includes('bcbits.com') || song.url.includes('bandcamp.com')) {
-      return `/api/bandcamp-audio-proxy?url=${encodeURIComponent(song.url)}`;
+      const proxyUrl = `/api/bandcamp-audio-proxy?url=${encodeURIComponent(song.url)}`;
+      // If we have a Bandcamp page URL, pass it so the proxy can refresh expired URLs
+      if (song.bandcamp_page_url) {
+        return `${proxyUrl}&pageUrl=${encodeURIComponent(song.bandcamp_page_url)}`;
+      }
+      return proxyUrl;
     }
     // Otherwise return as-is (might be a direct audio URL)
     return song.url;
