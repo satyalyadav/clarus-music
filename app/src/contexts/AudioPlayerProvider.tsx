@@ -106,30 +106,42 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
   };
 
   const playNext = () => {
-    if (queue.length === 0) return;
+    if (queue.length === 0 || !currentTrack) return;
     
-    // If currentIndex is invalid, try to find current track in queue
-    let nextIndex = currentIndex;
-    if (currentIndex < 0 || currentIndex >= queue.length - 1) {
-      // Try to find current track by URL or songId
-      if (currentTrack) {
-        const foundIndex = currentTrack.songId !== undefined
-          ? queue.findIndex((t) => t.songId === currentTrack.songId)
-          : queue.findIndex((t) => t.url === currentTrack.url);
-        
-        if (foundIndex !== -1 && foundIndex < queue.length - 1) {
-          nextIndex = foundIndex + 1;
-        } else {
-          // If at end or not found, can't go next
-          return;
-        }
-      } else {
-        return;
-      }
+    // Always verify currentIndex points to the current track
+    // This handles cases where the queue was updated but currentIndex is stale
+    let actualCurrentIndex = currentIndex;
+    
+    // Verify the currentIndex is valid and points to the current track
+    if (currentIndex < 0 || currentIndex >= queue.length) {
+      actualCurrentIndex = -1; // Invalid, need to find it
     } else {
-      nextIndex = currentIndex + 1;
+      const trackAtCurrentIndex = queue[currentIndex];
+      // Check if the track at currentIndex matches the current track
+      const matches = currentTrack.songId !== undefined
+        ? trackAtCurrentIndex.songId === currentTrack.songId
+        : trackAtCurrentIndex.url === currentTrack.url;
+      
+      if (!matches) {
+        actualCurrentIndex = -1; // Doesn't match, need to find it
+      }
     }
-
+    
+    // If currentIndex is invalid or doesn't match, find the current track
+    if (actualCurrentIndex === -1) {
+      actualCurrentIndex = currentTrack.songId !== undefined
+        ? queue.findIndex((t) => t.songId === currentTrack.songId)
+        : queue.findIndex((t) => t.url === currentTrack.url);
+    }
+    
+    // If still not found, can't proceed
+    if (actualCurrentIndex === -1) {
+      return;
+    }
+    
+    // Calculate next index
+    const nextIndex = actualCurrentIndex + 1;
+    
     if (nextIndex >= 0 && nextIndex < queue.length) {
       const nextTrack = queue[nextIndex];
       setCurrentIndex(nextIndex);
@@ -141,30 +153,42 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
   };
 
   const playPrevious = () => {
-    if (queue.length === 0) return;
+    if (queue.length === 0 || !currentTrack) return;
     
-    // If currentIndex is invalid, try to find current track in queue
-    let prevIndex = currentIndex;
-    if (currentIndex <= 0) {
-      // Try to find current track by URL or songId
-      if (currentTrack) {
-        const foundIndex = currentTrack.songId !== undefined
-          ? queue.findIndex((t) => t.songId === currentTrack.songId)
-          : queue.findIndex((t) => t.url === currentTrack.url);
-        
-        if (foundIndex !== -1 && foundIndex > 0) {
-          prevIndex = foundIndex - 1;
-        } else {
-          // If at start or not found, can't go previous
-          return;
-        }
-      } else {
-        return;
-      }
+    // Always verify currentIndex points to the current track
+    // This handles cases where the queue was updated but currentIndex is stale
+    let actualCurrentIndex = currentIndex;
+    
+    // Verify the currentIndex is valid and points to the current track
+    if (currentIndex < 0 || currentIndex >= queue.length) {
+      actualCurrentIndex = -1; // Invalid, need to find it
     } else {
-      prevIndex = currentIndex - 1;
+      const trackAtCurrentIndex = queue[currentIndex];
+      // Check if the track at currentIndex matches the current track
+      const matches = currentTrack.songId !== undefined
+        ? trackAtCurrentIndex.songId === currentTrack.songId
+        : trackAtCurrentIndex.url === currentTrack.url;
+      
+      if (!matches) {
+        actualCurrentIndex = -1; // Doesn't match, need to find it
+      }
     }
-
+    
+    // If currentIndex is invalid or doesn't match, find the current track
+    if (actualCurrentIndex === -1) {
+      actualCurrentIndex = currentTrack.songId !== undefined
+        ? queue.findIndex((t) => t.songId === currentTrack.songId)
+        : queue.findIndex((t) => t.url === currentTrack.url);
+    }
+    
+    // If still not found, can't proceed
+    if (actualCurrentIndex === -1) {
+      return;
+    }
+    
+    // Calculate previous index
+    const prevIndex = actualCurrentIndex - 1;
+    
     if (prevIndex >= 0 && prevIndex < queue.length) {
       const prevTrack = queue[prevIndex];
       setCurrentIndex(prevIndex);
