@@ -15,6 +15,7 @@ interface SearchResult {
   title: string;
   album: string;
   artist: string;
+  artistImage?: string;
   genre: string;
   coverArt: string;
   raw: any;
@@ -31,6 +32,7 @@ interface AlbumResult {
   type: "album";
   album: string;
   artist: string;
+  artistImage?: string;
   coverArt: string;
   genre: string;
   tracks: AlbumTrack[];
@@ -134,6 +136,7 @@ const SongCreate: React.FC = () => {
         title: data.title || "",
         album: data.album || "",
         artist: data.artist || "",
+        artistImage: data.artistImage || undefined,
         genre: data.genre || "",
         coverArt: data.coverArt || "",
         raw: {
@@ -373,20 +376,34 @@ const SongCreate: React.FC = () => {
     }
 
     try {
-      // Parse all artist names (main + featured)
-      const mainArtistNames = splitArtistNames(result.artist || "");
-      const featuredFromTitle = extractFeaturedFromTitle(result.title || "");
-      const allNames = Array.from(
-        new Set([...mainArtistNames, ...featuredFromTitle])
-      );
+      // For Bandcamp results, try to use artist name as-is first (Bandcamp is source of truth)
+      // Only split if there are clear indicators of multiple artists (like "feat." in title)
+      const isBandcampResult = result.raw?.url && isBandcampUrl(result.raw.url);
+      const hasFeaturedInTitle = /\(feat\.|\(featuring/i.test(result.title || "");
+      
+      let effectiveNames: string[] = [];
+      
+      if (isBandcampResult && !hasFeaturedInTitle) {
+        // For Bandcamp without featured artists in title, use artist name as-is
+        if (result.artist) {
+          effectiveNames = [result.artist];
+        }
+      } else {
+        // For non-Bandcamp or when there are featured artists, parse artist names
+        const mainArtistNames = splitArtistNames(result.artist || "");
+        const featuredFromTitle = extractFeaturedFromTitle(result.title || "");
+        const allNames = Array.from(
+          new Set([...mainArtistNames, ...featuredFromTitle])
+        );
 
-      // Fallback: if parsing failed, use raw artist string as single artist
-      const effectiveNames =
-        allNames.length > 0 && mainArtistNames.length > 0
-          ? allNames
-          : result.artist
-          ? [result.artist]
-          : [];
+        // Fallback: if parsing failed, use raw artist string as single artist
+        effectiveNames =
+          allNames.length > 0 && mainArtistNames.length > 0
+            ? allNames
+            : result.artist
+            ? [result.artist]
+            : [];
+      }
 
       let primaryArtistId: number | null = null;
       const allArtistIds: number[] = [];
@@ -408,6 +425,26 @@ const SongCreate: React.FC = () => {
 
       if (primaryArtistId != null) {
         setArtistId(primaryArtistId.toString());
+        
+        // Update artist image if Bandcamp provided one
+        if (result.artistImage && isBandcampUrl(result.raw?.url || "")) {
+          try {
+            await artistService.update(primaryArtistId, {
+              image_url: result.artistImage,
+            });
+            // Update local state
+            setArtists((prev) =>
+              prev.map((a) =>
+                a.artist_id === primaryArtistId
+                  ? { ...a, image_url: result.artistImage }
+                  : a
+              )
+            );
+          } catch (err) {
+            console.error("Error updating artist image:", err);
+            // Don't fail the whole operation if image update fails
+          }
+        }
       }
       setSelectedArtistIds(allArtistIds);
 
@@ -565,14 +602,9 @@ const SongCreate: React.FC = () => {
     setLoading(true);
 
     try {
-      // Parse artist names
-      const mainArtistNames = splitArtistNames(albumResult.artist || "");
-      const allNames =
-        mainArtistNames.length > 0
-          ? mainArtistNames
-          : albumResult.artist
-          ? [albumResult.artist]
-          : [];
+      // For Bandcamp albums, use artist name as-is (Bandcamp is source of truth)
+      // Albums are always from Bandcamp when using this handler, so don't split
+      const allNames = albumResult.artist ? [albumResult.artist] : [];
 
       let primaryArtistId: number | null = null;
       const allArtistIds: number[] = [];
@@ -594,6 +626,26 @@ const SongCreate: React.FC = () => {
 
       if (primaryArtistId == null) {
         throw new Error("Could not create or find artist");
+      }
+
+      // Update artist image if Bandcamp provided one
+      if (albumResult.artistImage) {
+        try {
+          await artistService.update(primaryArtistId, {
+            image_url: albumResult.artistImage,
+          });
+          // Update local state
+          setArtists((prev) =>
+            prev.map((a) =>
+              a.artist_id === primaryArtistId
+                ? { ...a, image_url: albumResult.artistImage }
+                : a
+            )
+          );
+        } catch (err) {
+          console.error("Error updating artist image:", err);
+          // Don't fail the whole operation if image update fails
+        }
       }
 
       // Find or create genre - use selected genre if available, otherwise try albumResult.genre

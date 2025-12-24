@@ -56,6 +56,7 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
       title: "",
       album: "",
       artist: "",
+      artistImage: "", // Artist profile image
       coverArt: "",
       genre: "",
       audioUrl: "", // The actual audio stream URL
@@ -279,6 +280,77 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
         "";
     }
 
+    // Extract artist image/profile picture
+    if (!metadata.artistImage) {
+      // Try various selectors for artist profile image
+      const artistImageSelectors = [
+        ".band-photo img",
+        ".band-photo",
+        ".band-photo-container img",
+        ".band-photo-container",
+        ".band-photo-wrapper img",
+        "a.band-photo img",
+        ".band-photo a img",
+        ".band-photo-link img",
+      ];
+
+      for (const selector of artistImageSelectors) {
+        const img = $(selector).first();
+        if (img.length) {
+          const src =
+            img.attr("src") ||
+            img.attr("data-src") ||
+            img.attr("data-original");
+          if (src) {
+            // Make sure it's a full URL
+            try {
+              metadata.artistImage = src.startsWith("http")
+                ? src
+                : new URL(src, url).href;
+              break;
+            } catch (e) {
+              // Invalid URL, continue to next selector
+            }
+          }
+        }
+      }
+
+      // Also try to extract from JSON-LD structured data
+      if (!metadata.artistImage && jsonLdData) {
+        if (jsonLdData["@type"] === "MusicGroup" && jsonLdData.image) {
+          metadata.artistImage = jsonLdData.image;
+        } else if (jsonLdData.byArtist?.image) {
+          metadata.artistImage = jsonLdData.byArtist.image;
+        }
+      }
+
+      // Try to find artist image in tralbumData
+      if (!metadata.artistImage && tralbumData) {
+        if (tralbumData.artist_image) {
+          metadata.artistImage = tralbumData.artist_image;
+        } else if (tralbumData.current?.artist_image) {
+          metadata.artistImage = tralbumData.current.artist_image;
+        }
+      }
+    }
+
+    // Clean up artist image URL - ensure it's a full URL
+    if (metadata.artistImage && !metadata.artistImage.startsWith("http")) {
+      try {
+        metadata.artistImage = new URL(metadata.artistImage, url).href;
+      } catch (e) {
+        metadata.artistImage = "";
+      }
+    }
+
+    // Remove size parameters from artist image to get higher quality
+    if (metadata.artistImage) {
+      metadata.artistImage = metadata.artistImage.replace(
+        /_\d+\.(jpg|png)$/,
+        "_0.$1"
+      );
+    }
+
     // Extract album name if it's a track page
     if (!metadata.album) {
       const albumLink = $('a[href*="/album/"]');
@@ -412,6 +484,7 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
           (tralbumData && tralbumData.current?.album_title) ||
           "",
         artist: metadata.artist || (tralbumData && tralbumData.artist) || "",
+        artistImage: metadata.artistImage || "",
         coverArt: metadata.coverArt || "",
         genre: metadata.genre || "",
         tracks: allTracks,

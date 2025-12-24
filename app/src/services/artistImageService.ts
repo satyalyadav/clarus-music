@@ -8,16 +8,24 @@ import { artistService, Artist } from './db';
 
 export const artistImageService = {
   /**
-   * Fetches artist image URL using Spotify API
-   * Falls back gracefully if Spotify is not configured or fails
+   * Fetches artist image URL
+   * Prioritizes Bandcamp image if provided, falls back to Spotify API
    */
-  async fetchArtistImage(artistName: string): Promise<string | null> {
+  async fetchArtistImage(
+    artistName: string,
+    bandcampArtistImage?: string
+  ): Promise<string | null> {
     if (!artistName || artistName.trim().length === 0) {
       return null;
     }
 
+    // If Bandcamp artist image is provided, use it first
+    if (bandcampArtistImage && bandcampArtistImage.trim().length > 0) {
+      return bandcampArtistImage;
+    }
+
     try {
-      // Try Spotify first (best quality and most reliable)
+      // Try Spotify as fallback
       const spotifyImage = await spotifyService.getArtistImage(artistName.trim());
       if (spotifyImage) {
         return spotifyImage;
@@ -34,9 +42,13 @@ export const artistImageService = {
    * Fetches and updates artist image in the database
    * Returns the image URL if successful, null otherwise
    */
-  async fetchAndUpdateArtistImage(artistId: number, artistName: string): Promise<string | null> {
+  async fetchAndUpdateArtistImage(
+    artistId: number,
+    artistName: string,
+    bandcampArtistImage?: string
+  ): Promise<string | null> {
     try {
-      const imageUrl = await this.fetchArtistImage(artistName);
+      const imageUrl = await this.fetchArtistImage(artistName, bandcampArtistImage);
       if (imageUrl) {
         await artistService.update(artistId, { image_url: imageUrl });
         return imageUrl;
