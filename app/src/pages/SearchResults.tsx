@@ -116,8 +116,6 @@ const SearchResults: React.FC = () => {
       navigate(`/albums/${result.id}`);
     } else if (result.type === 'artist' && result.id) {
       navigate(`/artists/${result.id}`);
-    } else if (result.type === 'genre' && result.id) {
-      navigate(`/genres/${result.id}`);
     } else if (result.type === 'playlist' && result.id) {
       navigate(`/playlists/${result.id}`);
     }
@@ -209,8 +207,6 @@ const SearchResults: React.FC = () => {
         return '💿';
       case 'artist':
         return '🎤';
-      case 'genre':
-        return '🎹';
       case 'playlist':
         return '🎶';
       default:
@@ -229,7 +225,7 @@ const SearchResults: React.FC = () => {
 
       {!query.trim() ? (
         <div className="empty">
-          <p>Enter a search query to find songs, albums, artists, genres, and playlists.</p>
+          <p>Enter a search query to find songs, albums, artists, and playlists.</p>
         </div>
       ) : results.length === 0 ? (
         <div className="empty">
@@ -299,7 +295,7 @@ const SearchResults: React.FC = () => {
                   </div>
                 );
               } else {
-                // Non-song results (albums, artists, genres, playlists)
+                // Non-song results (albums, artists, playlists)
                 return (
                   <div
                     key={`${result.type}-${result.id}`}

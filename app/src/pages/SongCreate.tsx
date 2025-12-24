@@ -4,11 +4,9 @@ import {
   songService,
   albumService,
   artistService,
-  genreService,
   songArtistService,
   Album,
   Artist,
-  Genre,
 } from "../services/db";
 
 interface SearchResult {
@@ -16,7 +14,6 @@ interface SearchResult {
   album: string;
   artist: string;
   artistImage?: string;
-  genre: string;
   coverArt: string;
   raw: any;
 }
@@ -34,7 +31,6 @@ interface AlbumResult {
   artist: string;
   artistImage?: string;
   coverArt: string;
-  genre: string;
   tracks: AlbumTrack[];
   pageUrl: string;
 }
@@ -47,7 +43,6 @@ const SongCreate: React.FC = () => {
   const [title, setTitle] = useState("");
   const [albumId, setAlbumId] = useState("");
   const [artistId, setArtistId] = useState("");
-  const [genreId, setGenreId] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [songUrl, setSongUrl] = useState<string>(""); // For Bandcamp/external URLs
   const [bandcampPageUrl, setBandcampPageUrl] = useState<string>(""); // Original Bandcamp page URL for refreshing expired URLs
@@ -60,7 +55,6 @@ const SongCreate: React.FC = () => {
   const [artists, setArtists] = useState<(Artist & { artist_id: number })[]>(
     []
   );
-  const [genres, setGenres] = useState<(Genre & { genre_id: number })[]>([]);
   const [selectedArtistIds, setSelectedArtistIds] = useState<number[]>([]);
 
   // Search functionality
@@ -75,14 +69,12 @@ const SongCreate: React.FC = () => {
   const [albumResult, setAlbumResult] = useState<AlbumResult | null>(null);
   const [selectedTracks, setSelectedTracks] = useState<Set<number>>(new Set());
   const [showAlbumSelection, setShowAlbumSelection] = useState(false);
-  const [albumGenreId, setAlbumGenreId] = useState<string>(""); // Genre selection for album tracks
 
   useEffect(() => {
     Promise.all([
       albumService.getAll(),
       artistService.getAll(),
-      genreService.getAll(),
-    ]).then(([albums, artists, genres]) => {
+    ]).then(([albums, artists]) => {
       // Filter out items without IDs since the UI requires them
       setAlbums(
         albums.filter(
@@ -92,11 +84,6 @@ const SongCreate: React.FC = () => {
       setArtists(
         artists.filter(
           (a): a is Artist & { artist_id: number } => a.artist_id !== undefined
-        )
-      );
-      setGenres(
-        genres.filter(
-          (g): g is Genre & { genre_id: number } => g.genre_id !== undefined
         )
       );
     });
@@ -137,7 +124,6 @@ const SongCreate: React.FC = () => {
         album: data.album || "",
         artist: data.artist || "",
         artistImage: data.artistImage || undefined,
-        genre: data.genre || "",
         coverArt: data.coverArt || "",
         raw: {
           ...data,
@@ -152,35 +138,27 @@ const SongCreate: React.FC = () => {
     }
   };
 
-  // Extract Apple Music track ID from various formats
-  const extractAppleMusicTrackId = (query: string): string | null => {
+  // Extract Spotify track ID from various formats
+  const extractSpotifyTrackId = (query: string): string | null => {
     const trimmed = query.trim();
 
-    // If it's just a numeric ID (8+ digits), use it directly
-    if (/^\d{8,}$/.test(trimmed)) {
+    // Extract from Spotify track URL: open.spotify.com/track/TRACK_ID
+    const trackUrlMatch = trimmed.match(
+      /open\.spotify\.com\/track\/([a-zA-Z0-9]+)/i
+    );
+    if (trackUrlMatch) {
+      return trackUrlMatch[1];
+    }
+
+    // Extract from Spotify URI: spotify:track:TRACK_ID
+    const uriMatch = trimmed.match(/spotify:track:([a-zA-Z0-9]+)/i);
+    if (uriMatch) {
+      return uriMatch[1];
+    }
+
+    // If it's just an alphanumeric ID (Spotify IDs are typically 22 chars)
+    if (/^[a-zA-Z0-9]{22}$/.test(trimmed)) {
       return trimmed;
-    }
-
-    // Extract from Apple Music song URL: music.apple.com/.../song/.../TRACK_ID
-    const songUrlMatch = trimmed.match(
-      /music\.apple\.com\/[^/]+\/song\/[^/]+\/(\d{8,})/i
-    );
-    if (songUrlMatch) {
-      return songUrlMatch[1];
-    }
-
-    // Extract from album URL with track parameter: .../album/...?i=TRACK_ID
-    const albumUrlMatch = trimmed.match(/[?&]i=(\d{8,})/i);
-    if (albumUrlMatch) {
-      return albumUrlMatch[1];
-    }
-
-    // Extract from full Apple Music URL
-    const fullUrlMatch = trimmed.match(
-      /apple\.com\/[^/]+\/(?:song|album)\/[^/]+\/(\d{8,})/i
-    );
-    if (fullUrlMatch) {
-      return fullUrlMatch[1];
     }
 
     return null;
@@ -211,71 +189,205 @@ const SongCreate: React.FC = () => {
       .filter(Boolean);
   };
 
-  // Debounced search - only active in Bandcamp mode
-  useEffect(() => {
-    // Only process search in Bandcamp mode
-    if (addMode !== "bandcamp") {
-      setSearchResults([]);
-      setShowResults(false);
-      return;
-    }
+  // Validate and fetch a reliable artist image from Spotify
+  const validateAndGetArtistImage = async (
+    artistId: string
+  ): Promise<string | null> => {
+    try {
+      const response = await fetch(`/api/spotify-artist/${artistId}`);
+      if (!response.ok) {
+        console.warn(
+          `Failed to fetch artist ${artistId} from Spotify: ${response.status} ${response.statusText}`
+        );
+        return null;
+      }
 
+      const artistData = await response.json();
+
+      if (Array.isArray(artistData.images) && artistData.images.length > 0) {
+        // Spotify typically returns largest image first
+        const imageUrl = artistData.images[0].url;
+
+        try {
+          // Optional: basic validation that URL responds
+          const headResponse = await fetch(imageUrl, { method: "HEAD" });
+          if (headResponse.ok) {
+            return imageUrl;
+          }
+        } catch (e) {
+          // If HEAD fails (CORS, etc.), still return URL
+          console.warn("Artist image HEAD validation failed:", e);
+        }
+
+        return imageUrl;
+      }
+
+      return null;
+    } catch (error) {
+      console.error("Error validating artist image from Spotify:", error);
+      return null;
+    }
+  };
+
+  // Debounced search - different behavior for upload vs bandcamp mode
+  useEffect(() => {
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
 
     const trimmedQuery = searchQuery.trim();
 
-    // Only process Bandcamp URLs in Bandcamp mode
-    if (!isBandcampUrl(trimmedQuery)) {
-      setSearchResults([]);
-      setShowResults(false);
-      if (trimmedQuery.length > 0) {
-        setError("Please enter a valid Bandcamp URL");
-      } else {
-        setError(null);
+    // Bandcamp mode: only process Bandcamp URLs
+    if (addMode === "bandcamp") {
+      if (!isBandcampUrl(trimmedQuery)) {
+        setSearchResults([]);
+        setShowResults(false);
+        if (trimmedQuery.length > 0) {
+          setError("Please enter a valid Bandcamp URL");
+        } else {
+          setError(null);
+        }
+        return;
       }
-      return;
     }
 
-    // Check if it's a Bandcamp URL
+    // Upload mode: skip if empty or if it's a Bandcamp URL (should use Bandcamp mode for that)
+    if (addMode === "upload") {
+      if (trimmedQuery.length === 0) {
+        setSearchResults([]);
+        setShowResults(false);
+        setError(null);
+        return;
+      }
+      // If user enters Bandcamp URL in upload mode, suggest switching
+      if (isBandcampUrl(trimmedQuery)) {
+        setSearchResults([]);
+        setShowResults(false);
+        setError("Please switch to Bandcamp mode for Bandcamp URLs");
+        return;
+      }
+    }
+
+    // Process search based on mode
     searchTimeoutRef.current = setTimeout(async () => {
       setSearchLoading(true);
       setError(null);
+      
       try {
-        const result = await extractBandcampMetadata(trimmedQuery);
-        if (result === null) {
-          // It's an album - fetch the album data separately
-          const response = await fetch(
-            `/api/bandcamp-metadata?url=${encodeURIComponent(trimmedQuery)}`
-          );
-          if (!response.ok) {
-            throw new Error("Failed to fetch album data");
-          }
-          const albumData: AlbumResult = await response.json();
-          if (albumData.type === "album" && albumData.tracks.length > 0) {
-            setAlbumResult(albumData);
-            setSelectedTracks(new Set(albumData.tracks.map((_, i) => i))); // Select all by default
-            setShowAlbumSelection(true);
-            setSearchResults([]);
-            setShowResults(false);
+        if (addMode === "bandcamp") {
+          // Bandcamp mode: extract metadata from Bandcamp URL
+          const result = await extractBandcampMetadata(trimmedQuery);
+          if (result === null) {
+            // It's an album - fetch the album data separately
+            const response = await fetch(
+              `/api/bandcamp-metadata?url=${encodeURIComponent(trimmedQuery)}`
+            );
+            if (!response.ok) {
+              throw new Error("Failed to fetch album data");
+            }
+            const albumData: AlbumResult = await response.json();
+            if (albumData.type === "album" && albumData.tracks.length > 0) {
+              setAlbumResult(albumData);
+              setSelectedTracks(new Set(albumData.tracks.map((_, i) => i))); // Select all by default
+              setShowAlbumSelection(true);
+              setSearchResults([]);
+              setShowResults(false);
+            } else {
+              setSearchResults([]);
+              setError("Could not extract album data from Bandcamp URL");
+            }
+          } else if (result) {
+            setSearchResults([result]);
+            setShowResults(true);
+            setAlbumResult(null);
+            setShowAlbumSelection(false);
           } else {
             setSearchResults([]);
-            setError("Could not extract album data from Bandcamp URL");
+            setError("Could not extract metadata from Bandcamp URL");
           }
-        } else if (result) {
-          setSearchResults([result]);
+        } else if (addMode === "upload") {
+          // Upload mode: search Spotify
+          const spotifyId = extractSpotifyTrackId(trimmedQuery);
+          const isLookup = spotifyId !== null;
+
+          if (!isLookup && trimmedQuery.length < 2) {
+            setSearchResults([]);
+            setShowResults(false);
+            return;
+          }
+
+          let spotifyData: any;
+
+          if (isLookup && spotifyId) {
+            // Use track lookup API when we detect a Spotify ID
+            const response = await fetch(`/api/spotify-track/${spotifyId}`);
+            if (!response.ok) {
+              throw new Error(`Spotify API error: ${response.statusText}`);
+            }
+            const track = await response.json();
+            // Normalize to search results shape
+            spotifyData = { tracks: { items: [track] } };
+          } else {
+            // Use search API for regular text queries
+            const term = encodeURIComponent(trimmedQuery);
+            const response = await fetch(
+              `/api/spotify-search?q=${term}&type=track&limit=25`
+            );
+            if (!response.ok) {
+              throw new Error(`Spotify API error: ${response.statusText}`);
+            }
+            spotifyData = await response.json();
+          }
+
+          const results: SearchResult[] = (spotifyData.tracks?.items || []).map(
+            (item: any) => {
+              // Spotify album images array, usually sorted largest -> smallest
+              let albumArt = "";
+              if (item.album?.images?.length > 0) {
+                albumArt = item.album.images[0].url;
+              }
+
+              const artistNames =
+                item.artists?.map((a: any) => a.name).join(", ") || "";
+
+              // Create a map of artist name -> Spotify ID for reliable matching
+              const artistNameToIdMap = new Map<string, string>();
+              if (Array.isArray(item.artists)) {
+                item.artists.forEach((a: any) => {
+                  if (a.name && a.id) {
+                    artistNameToIdMap.set(a.name, a.id);
+                  }
+                });
+              }
+
+              return {
+                title: item.name || "",
+                album: item.album?.name || "",
+                artist: artistNames,
+                coverArt: albumArt,
+                raw: {
+                  ...item,
+                  // Keep artist IDs for later image validation
+                  artistIds: Array.isArray(item.artists)
+                    ? item.artists.map((a: any) => a.id).filter(Boolean)
+                    : [],
+                  // Map artist names to Spotify IDs for reliable matching
+                  artistNameToIdMap: artistNameToIdMap,
+                },
+              };
+            }
+          );
+
+          setSearchResults(results);
           setShowResults(true);
-          setAlbumResult(null);
-          setShowAlbumSelection(false);
-        } else {
-          setSearchResults([]);
-          setError("Could not extract metadata from Bandcamp URL");
         }
       } catch (err: any) {
-        console.error("Bandcamp extraction error:", err);
+        console.error("Search error:", err);
         setError(
-          err.message || "Failed to extract metadata from Bandcamp URL"
+          err.message || 
+          (addMode === "bandcamp" 
+            ? "Failed to extract metadata from Bandcamp URL"
+            : "Failed to search Spotify")
         );
         setSearchResults([]);
       } finally {
@@ -290,15 +402,6 @@ const SongCreate: React.FC = () => {
     };
   }, [searchQuery, addMode]);
 
-  // Set genre from album data when album result changes
-  useEffect(() => {
-    if (albumResult?.genre && genres.length > 0) {
-      const existingGenre = genres.find((g) => g.name === albumResult.genre);
-      if (existingGenre && existingGenre.genre_id) {
-        setAlbumGenreId(existingGenre.genre_id.toString());
-      }
-    }
-  }, [albumResult?.genre, genres]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -378,7 +481,8 @@ const SongCreate: React.FC = () => {
     try {
       // For Bandcamp results, try to use artist name as-is first (Bandcamp is source of truth)
       // Only split if there are clear indicators of multiple artists (like "feat." in title)
-      const isBandcampResult = result.raw?.url && isBandcampUrl(result.raw.url);
+      const isBandcampResult =
+        result.raw?.url && isBandcampUrl(result.raw.url);
       const hasFeaturedInTitle = /\(feat\.|\(featuring/i.test(result.title || "");
       
       let effectiveNames: string[] = [];
@@ -389,7 +493,7 @@ const SongCreate: React.FC = () => {
           effectiveNames = [result.artist];
         }
       } else {
-        // For non-Bandcamp or when there are featured artists, parse artist names
+        // For non-Bandcamp (Spotify) or when there are featured artists, parse artist names
         const mainArtistNames = splitArtistNames(result.artist || "");
         const featuredFromTitle = extractFeaturedFromTitle(result.title || "");
         const allNames = Array.from(
@@ -403,6 +507,15 @@ const SongCreate: React.FC = () => {
             : result.artist
             ? [result.artist]
             : [];
+        
+        if (import.meta.env.DEV) {
+          console.log("Parsed artists from Spotify result:", {
+            rawArtist: result.artist,
+            mainArtistNames,
+            featuredFromTitle,
+            effectiveNames,
+          });
+        }
       }
 
       let primaryArtistId: number | null = null;
@@ -423,16 +536,71 @@ const SongCreate: React.FC = () => {
         }
       }
 
+      if (import.meta.env.DEV) {
+        console.log("Created/found artists:", {
+          effectiveNames,
+          allArtistIds,
+          primaryArtistId,
+        });
+      }
+
       if (primaryArtistId != null) {
         setArtistId(primaryArtistId.toString());
-        
-        // Update artist image if Bandcamp provided one
-        if (result.artistImage && isBandcampUrl(result.raw?.url || "")) {
+        // Update artist images using Spotify validation if we have Spotify artist IDs
+        const spotifyArtistIds: string[] =
+          (result.raw && Array.isArray(result.raw.artistIds)
+            ? result.raw.artistIds
+            : []) || [];
+
+        if (spotifyArtistIds.length > 0) {
+          // Validate and update images for ALL artists, not just the primary one
+          // Match artists by name using the artistNameToIdMap for reliable matching
+          const artistNameToIdMap: Map<string, string> =
+            result.raw?.artistNameToIdMap || new Map();
+
+          const imageUpdatePromises = effectiveNames.map(async (artistName, index) => {
+            const dbArtistId = allArtistIds[index];
+            if (!dbArtistId) return;
+
+            // Try to find Spotify ID by artist name (most reliable)
+            let spotifyArtistId: string | undefined = artistNameToIdMap.get(artistName);
+            
+            // Fallback to index-based matching if name lookup fails
+            if (!spotifyArtistId && index < spotifyArtistIds.length) {
+              spotifyArtistId = spotifyArtistIds[index];
+            }
+
+            if (spotifyArtistId) {
+              try {
+                const validatedImageUrl = await validateAndGetArtistImage(spotifyArtistId);
+                if (validatedImageUrl) {
+                  await artistService.update(dbArtistId, {
+                    image_url: validatedImageUrl,
+                  });
+                  // Update local state
+                  setArtists((prev) =>
+                    prev.map((a) =>
+                      a.artist_id === dbArtistId
+                        ? { ...a, image_url: validatedImageUrl }
+                        : a
+                    )
+                  );
+                }
+              } catch (err) {
+                console.error(`Error updating artist image from Spotify for "${artistName}":`, err);
+                // Don't fail the whole operation if image validation fails
+              }
+            }
+          });
+
+          // Wait for all image updates to complete (but don't block on errors)
+          await Promise.allSettled(imageUpdatePromises);
+        } else if (result.artistImage && isBandcampResult) {
+          // Fallback: if no Spotify IDs, still use Bandcamp image when available
           try {
             await artistService.update(primaryArtistId, {
               image_url: result.artistImage,
             });
-            // Update local state
             setArtists((prev) =>
               prev.map((a) =>
                 a.artist_id === primaryArtistId
@@ -441,25 +609,11 @@ const SongCreate: React.FC = () => {
               )
             );
           } catch (err) {
-            console.error("Error updating artist image:", err);
-            // Don't fail the whole operation if image update fails
+            console.error("Error updating artist image from Bandcamp:", err);
           }
         }
       }
       setSelectedArtistIds(allArtistIds);
-
-      // Find or create genre
-      let genre = genres.find((g) => g.name === result.genre);
-      if (!genre && result.genre) {
-        const genreId = await genreService.create({
-          name: result.genre,
-        });
-        genre = { genre_id: genreId, name: result.genre };
-        setGenres([...genres, genre]);
-      }
-      if (genre && genre.genre_id) {
-        setGenreId(genre.genre_id.toString());
-      }
 
       // Find or create album (requires primary artist_id)
       if (result.album && primaryArtistId != null) {
@@ -468,13 +622,34 @@ const SongCreate: React.FC = () => {
           const albumId = await albumService.create({
             title: result.album,
             artist_id: primaryArtistId,
+            cover_image: result.coverArt || null, // Include cover image from search result
           });
           album = {
             album_id: albumId,
             title: result.album,
             artist_id: primaryArtistId,
+            cover_image: result.coverArt || null,
           };
           setAlbums([...albums, album]);
+        } else {
+          // Update album cover image if it's missing but we have one from the search result
+          if (!album.cover_image && result.coverArt) {
+            try {
+              await albumService.update(album.album_id!, {
+                cover_image: result.coverArt,
+              });
+              // Update local state
+              setAlbums((prev) =>
+                prev.map((a) =>
+                  a.album_id === album.album_id
+                    ? { ...a, cover_image: result.coverArt }
+                    : a
+                )
+              );
+            } catch (err) {
+              console.error("Error updating album cover image:", err);
+            }
+          }
         }
         if (album && album.album_id) {
           setAlbumId(album.album_id.toString());
@@ -502,11 +677,6 @@ const SongCreate: React.FC = () => {
 
     if (!artistId) {
       setError("Artist is required");
-      return;
-    }
-
-    if (!genreId) {
-      setError("Genre is required");
       return;
     }
 
@@ -548,7 +718,6 @@ const SongCreate: React.FC = () => {
       const newSongId = await songService.create({
         title: title.trim(),
         artist_id: parseInt(artistId),
-        genre_id: parseInt(genreId),
         album_id: albumId ? parseInt(albumId) : null,
         duration: finalDuration,
         file_blob: fileBlob,
@@ -559,10 +728,20 @@ const SongCreate: React.FC = () => {
 
       // Associate all detected artists with this song (many-to-many)
       const primaryId = parseInt(artistId);
-      const allIds =
-        selectedArtistIds.length > 0
-          ? Array.from(new Set([primaryId, ...selectedArtistIds]))
-          : [primaryId];
+      // Ensure we include all artists from selectedArtistIds, plus the primary artist
+      const allIds = Array.from(
+        new Set([primaryId, ...selectedArtistIds])
+      );
+      
+      if (import.meta.env.DEV) {
+        console.log("Associating song with artists:", {
+          songId: newSongId,
+          primaryArtistId: primaryId,
+          allArtistIds: allIds,
+          selectedArtistIds: selectedArtistIds,
+        });
+      }
+      
       await songArtistService.setArtistsForSong(newSongId, allIds);
 
       navigate("/songs");
@@ -648,30 +827,6 @@ const SongCreate: React.FC = () => {
         }
       }
 
-      // Find or create genre - use selected genre if available, otherwise try albumResult.genre
-      let genre: (Genre & { genre_id: number }) | null = null;
-      
-      if (albumGenreId) {
-        // Use the genre selected by the user
-        genre = genres.find((g) => g.genre_id?.toString() === albumGenreId) as (Genre & { genre_id: number }) | undefined || null;
-      }
-      
-      // Fallback to albumResult.genre if no genre was selected
-      if (!genre && albumResult.genre) {
-        genre = genres.find((g) => g.name === albumResult.genre) as (Genre & { genre_id: number }) | undefined || null;
-        if (!genre) {
-          const genreId = await genreService.create({
-            name: albumResult.genre,
-          });
-          genre = { genre_id: genreId, name: albumResult.genre };
-          setGenres([...genres, genre]);
-        }
-      }
-      
-      if (!genre || !genre.genre_id) {
-        throw new Error("Please select a genre before adding tracks");
-      }
-
       // Find or create album
       let album = albums.find((a) => a.title === albumResult.album);
       if (!album && albumResult.album) {
@@ -714,7 +869,6 @@ const SongCreate: React.FC = () => {
           const newSongId = await songService.create({
             title: track.title || "",
             artist_id: primaryArtistId,
-            genre_id: genre.genre_id,
             album_id: album?.album_id || null,
             duration: track.duration || "00:00:00",
             url: track.audioUrl,
@@ -838,11 +992,6 @@ const SongCreate: React.FC = () => {
               <div style={{ color: "var(--text-secondary)", marginBottom: "4px" }}>
                 {albumResult.artist}
               </div>
-              {albumResult.genre && (
-                <div style={{ color: "var(--text-muted)", fontSize: "0.9em" }}>
-                  {albumResult.genre}
-                </div>
-              )}
               <div
                 style={{
                   color: "var(--text-muted)",
@@ -922,34 +1071,6 @@ const SongCreate: React.FC = () => {
                 return `${validSelectedCount} of ${validTrackCount} available selected`;
               })()}
             </div>
-          </div>
-
-          <div className="form-group" style={{ marginBottom: "16px" }}>
-            <label className="form-label">//genre</label>
-            <select
-              className="form-input"
-              value={albumGenreId}
-              onChange={(e) => setAlbumGenreId(e.target.value)}
-            >
-              <option value="">select genre</option>
-              {genres.map((g) => (
-                <option key={g.genre_id} value={g.genre_id}>
-                  {g.name}
-                </option>
-              ))}
-            </select>
-            {albumResult.genre && !albumGenreId && (
-              <div
-                style={{
-                  marginTop: "4px",
-                  fontSize: "0.85em",
-                  color: "var(--text-muted)",
-                  fontStyle: "italic",
-                }}
-              >
-                Suggested: {albumResult.genre}
-              </div>
-            )}
           </div>
 
           <div
@@ -1050,7 +1171,7 @@ const SongCreate: React.FC = () => {
               type="button"
               className="btn btn-primary"
               onClick={handleAddAlbumTracks}
-              disabled={loading || selectedTracks.size === 0 || !albumGenreId}
+              disabled={loading || selectedTracks.size === 0}
             >
               {loading
                 ? "Adding..."
@@ -1063,7 +1184,6 @@ const SongCreate: React.FC = () => {
                 setShowAlbumSelection(false);
                 setAlbumResult(null);
                 setSelectedTracks(new Set());
-                setAlbumGenreId("");
                 setSearchQuery("");
               }}
               disabled={loading}
@@ -1123,80 +1243,183 @@ const SongCreate: React.FC = () => {
 
       <form onSubmit={handleSubmit}>
         {addMode === "upload" ? (
-          <div className="form-group">
-            <label className="form-label">//audio file</label>
-            <div className="file-input-row">
-              <label className="btn btn-primary file-input-button">
-                choose file
+          <>
+            <div
+              className="form-group"
+              ref={searchContainerRef}
+              style={{ position: "relative" }}
+            >
+              <label className="form-label">//search song</label>
                 <input
-                  type="file"
-                  accept="audio/*"
-                  onChange={async (e) => {
-                    const selectedFile = e.target.files?.[0] || null;
-                    setFile(selectedFile);
-
-                    // Extract duration from audio file
-                    if (selectedFile) {
-                      try {
-                        const audio = new Audio();
-                        const objectUrl = URL.createObjectURL(selectedFile);
-                        audio.src = objectUrl;
-
-                        await new Promise((resolve, reject) => {
-                          audio.addEventListener("loadedmetadata", () => {
-                            const durationSeconds = Math.floor(
-                              audio.duration
-                            );
-                            const hours = Math.floor(durationSeconds / 3600);
-                            const minutes = Math.floor(
-                              (durationSeconds % 3600) / 60
-                            );
-                            const seconds = durationSeconds % 60;
-
-                            // Format as PostgreSQL interval: Always use HH:MM:SS format to avoid ambiguity
-                            // PostgreSQL interprets MM:SS as hours:minutes, so we use 00:MM:SS for songs under 1 hour
-                            const durationStr = `${String(hours).padStart(
-                              2,
-                              "0"
-                            )}:${String(minutes).padStart(2, "0")}:${String(
-                              seconds
-                            ).padStart(2, "0")}`;
-
-                            setDuration(durationStr);
-                            URL.revokeObjectURL(objectUrl);
-                            resolve(null);
-                          });
-                          audio.addEventListener("error", reject);
-                        });
-                      } catch (err) {
-                        console.error("Error extracting duration:", err);
-                        setDuration("");
-                        setError(
-                          "Failed to extract duration from audio file. Please try another file."
-                        );
-                      }
-                    } else {
-                      setDuration("");
-                    }
-                  }}
+                  type="text"
+                  className="form-input"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="type song name or paste Spotify link..."
+                  onFocus={() => searchResults.length > 0 && setShowResults(true)}
                 />
-              </label>
-              <div className="file-input-name">
-                {file ? file.name : "no file selected"}
-              </div>
+              {showResults && searchResults.length > 0 && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "100%",
+                    left: 0,
+                    right: 0,
+                    backgroundColor: "var(--card-bg)",
+                    border: "1px solid var(--border-color)",
+                    borderRadius: "4px",
+                    maxHeight: "300px",
+                    overflowY: "auto",
+                    zIndex: 1000,
+                    marginTop: "4px",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+                  }}
+                >
+                  {searchLoading && (
+                    <div
+                      style={{
+                        padding: "12px",
+                        textAlign: "center",
+                        color: "var(--text-primary)",
+                      }}
+                    >
+                      searching...
+                    </div>
+                  )}
+                  {!searchLoading &&
+                    searchResults.map((result, index) => (
+                      <div
+                        key={index}
+                        onClick={() => handleSelectResult(result)}
+                        style={{
+                          padding: "12px",
+                          cursor: "pointer",
+                          borderBottom: "1px solid var(--border-color)",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "12px",
+                          backgroundColor: "var(--card-bg)",
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor =
+                            "var(--button-hover)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = "var(--card-bg)";
+                        }}
+                      >
+                        {result.coverArt && (
+                          <img
+                            src={result.coverArt}
+                            alt=""
+                            style={{
+                              width: "50px",
+                              height: "50px",
+                              objectFit: "cover",
+                              borderRadius: "4px",
+                            }}
+                          />
+                        )}
+                        <div style={{ flex: 1 }}>
+                          <div
+                            style={{
+                              fontWeight: "bold",
+                              color: "var(--text-primary)",
+                            }}
+                          >
+                            {result.title || "Unknown"}
+                          </div>
+                        <div
+                          style={{
+                            fontSize: "0.9em",
+                            color: "var(--text-secondary)",
+                          }}
+                        >
+                          {result.artist || "Unknown Artist"}
+                          {result.album && ` • ${result.album}`}
+                        </div>
+                      </div>
+                      </div>
+                    ))}
+                </div>
+              )}
             </div>
-            {duration && (
-              <div
-                style={{
-                  marginTop: "4px",
-                  fontSize: "0.9em",
-                  color: "var(--text-muted)",
-                }}
-              >
-                Duration: {duration}
+
+            <div className="form-group">
+              <label className="form-label">//audio file</label>
+              <div className="file-input-row">
+                <label className="btn btn-primary file-input-button">
+                  choose file
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    onChange={async (e) => {
+                      const selectedFile = e.target.files?.[0] || null;
+                      setFile(selectedFile);
+
+                      // Extract duration from audio file
+                      if (selectedFile) {
+                        try {
+                          const audio = new Audio();
+                          const objectUrl = URL.createObjectURL(selectedFile);
+                          audio.src = objectUrl;
+
+                          await new Promise((resolve, reject) => {
+                            audio.addEventListener("loadedmetadata", () => {
+                              const durationSeconds = Math.floor(
+                                audio.duration
+                              );
+                              const hours = Math.floor(durationSeconds / 3600);
+                              const minutes = Math.floor(
+                                (durationSeconds % 3600) / 60
+                              );
+                              const seconds = durationSeconds % 60;
+
+                              // Format as PostgreSQL interval: Always use HH:MM:SS format to avoid ambiguity
+                              // PostgreSQL interprets MM:SS as hours:minutes, so we use 00:MM:SS for songs under 1 hour
+                              const durationStr = `${String(hours).padStart(
+                                2,
+                                "0"
+                              )}:${String(minutes).padStart(2, "0")}:${String(
+                                seconds
+                              ).padStart(2, "0")}`;
+
+                              setDuration(durationStr);
+                              URL.revokeObjectURL(objectUrl);
+                              resolve(null);
+                            });
+                            audio.addEventListener("error", reject);
+                          });
+                        } catch (err) {
+                          console.error("Error extracting duration:", err);
+                          setDuration("");
+                          setError(
+                            "Failed to extract duration from audio file. Please try another file."
+                          );
+                        }
+                      } else {
+                        setDuration("");
+                      }
+                    }}
+                  />
+                </label>
+                <div className="file-input-name">
+                  {file ? file.name : "no file selected"}
+                </div>
               </div>
-            )}
-          </div>
+              {duration && (
+                <div
+                  style={{
+                    marginTop: "4px",
+                    fontSize: "0.9em",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  Duration: {duration}
+                </div>
+              )}
+            </div>
+          </>
         ) : (
           <div
             className="form-group"
@@ -1327,16 +1550,6 @@ const SongCreate: React.FC = () => {
                           {result.artist || "Unknown Artist"}
                           {result.album && ` • ${result.album}`}
                         </div>
-                        {result.genre && (
-                          <div
-                            style={{
-                              fontSize: "0.8em",
-                              color: "var(--text-muted)",
-                            }}
-                          >
-                            {result.genre}
-                          </div>
-                        )}
                       </div>
                     </div>
                   ))}
@@ -1469,23 +1682,6 @@ const SongCreate: React.FC = () => {
             </div>
           )
         )}
-
-        <div className="form-group">
-          <label className="form-label">//genre</label>
-          <select
-            className="form-input"
-            value={genreId}
-            onChange={(e) => setGenreId(e.target.value)}
-            required={addMode === "bandcamp"}
-          >
-            <option value="">select genre</option>
-            {genres.map((g) => (
-              <option key={g.genre_id} value={g.genre_id}>
-                {g.name}
-              </option>
-            ))}
-          </select>
-        </div>
 
         <div style={{ display: "flex", gap: "12px", marginTop: "24px" }}>
           <button type="submit" className="btn btn-primary" disabled={loading}>

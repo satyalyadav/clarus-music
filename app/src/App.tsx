@@ -9,8 +9,6 @@ import AlbumList from "./pages/AlbumList";
 import AlbumDetail from "./pages/AlbumDetail";
 import ArtistList from "./pages/ArtistList";
 import ArtistDetail from "./pages/ArtistDetail";
-import GenreList from "./pages/GenreList";
-import GenreDetail from "./pages/GenreDetail";
 import PlaylistList from "./pages/PlaylistList";
 import PlaylistCreate from "./pages/PlaylistCreate";
 import PlaylistDetail from "./pages/PlaylistDetail";
@@ -30,9 +28,6 @@ const App: React.FC = () => {
 
         <Route path="/artists" element={<ArtistList />} />
         <Route path="/artists/:id" element={<ArtistDetail />} />
-
-        <Route path="/genres" element={<GenreList />} />
-        <Route path="/genres/:id" element={<GenreDetail />} />
 
         <Route path="/playlists" element={<PlaylistList />} />
         <Route path="/playlists/new" element={<PlaylistCreate />} />

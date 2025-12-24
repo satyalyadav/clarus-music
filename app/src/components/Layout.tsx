@@ -80,12 +80,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           //artists
         </NavLink>
         <NavLink
-          to="/genres"
-          className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
-        >
-          //genres
-        </NavLink>
-        <NavLink
           to="/playlists"
           className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
         >

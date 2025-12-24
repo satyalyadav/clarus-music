@@ -3,8 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { 
   songService, 
   albumService, 
-  artistService, 
-  genreService 
+  artistService
 } from "../services/db";
 
 interface Album {
@@ -17,17 +16,11 @@ interface Artist {
   name: string;
 }
 
-interface Genre {
-  genre_id?: number;
-  name: string;
-}
-
 interface Song {
   song_id?: number;
   title: string;
   album_id?: number | null;
   artist_id?: number;
-  genre_id?: number;
 }
 
 const SongEdit: React.FC = () => {
@@ -36,35 +29,30 @@ const SongEdit: React.FC = () => {
   const [title, setTitle] = useState("");
   const [albumId, setAlbumId] = useState("");
   const [artistId, setArtistId] = useState("");
-  const [genreId, setGenreId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const [albums, setAlbums] = useState<Album[]>([]);
   const [artists, setArtists] = useState<Artist[]>([]);
-  const [genres, setGenres] = useState<Genre[]>([]);
 
   useEffect(() => {
     const loadData = async () => {
       if (!id) return;
       const songId = parseInt(id);
-      const [song, albums, artists, genres] = await Promise.all([
+      const [song, albums, artists] = await Promise.all([
         songService.getById(songId),
         albumService.getAll(),
         artistService.getAll(),
-        genreService.getAll(),
       ]);
       
       if (song) {
         setTitle(song.title);
         setAlbumId(song.album_id?.toString() || "");
         setArtistId(song.artist_id?.toString() || "");
-        setGenreId(song.genre_id?.toString() || "");
       }
       setAlbums(albums);
       setArtists(artists);
-      setGenres(genres);
     };
     loadData();
   }, [id]);
@@ -81,7 +69,6 @@ const SongEdit: React.FC = () => {
         title,
         album_id: albumId ? parseInt(albumId) : null,
         artist_id: artistId ? parseInt(artistId) : undefined,
-        genre_id: genreId ? parseInt(genreId) : undefined,
       });
       navigate("/songs");
     } catch (err: any) {
@@ -160,22 +147,6 @@ const SongEdit: React.FC = () => {
               ))}
             </select>
           </div>
-        </div>
-
-        <div className="form-group">
-          <label className="form-label">//genre</label>
-          <select
-            className="form-input"
-            value={genreId}
-            onChange={(e) => setGenreId(e.target.value)}
-          >
-            <option value="">select genre</option>
-            {genres.map((g) => (
-              <option key={g.genre_id} value={g.genre_id}>
-                {g.name}
-              </option>
-            ))}
-          </select>
         </div>
 
         <div style={{ display: "flex", gap: "12px", marginTop: "24px" }}>

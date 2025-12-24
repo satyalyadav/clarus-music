@@ -1,6 +1,11 @@
 import express from "express";
 import cors from "cors";
 import * as cheerio from "cheerio";
+import dotenv from "dotenv";
+
+// Load backend-specific environment variables from app/backend/.env
+// (SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, etc.)
+dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -8,6 +13,67 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Simple in-memory cache for Spotify access tokens
+let spotifyTokenCache = {
+  token: null,
+  expiresAt: 0,
+};
+
+// Helper to get a Spotify access token using Client Credentials flow
+async function getSpotifyAccessToken() {
+  const now = Date.now();
+
+  // Return cached token if still valid
+  if (spotifyTokenCache.token && now < spotifyTokenCache.expiresAt) {
+    return spotifyTokenCache.token;
+  }
+
+  // Backend-only env vars (recommended: do not expose secrets via Vite)
+  const clientId = process.env.SPOTIFY_CLIENT_ID;
+  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn(
+        "[Spotify] Missing credentials:",
+        "SPOTIFY_CLIENT_ID present?",
+        !!clientId,
+        "SPOTIFY_CLIENT_SECRET present?",
+        !!clientSecret
+      );
+    }
+    throw new Error("Spotify credentials not configured");
+  }
+
+  const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString(
+    "base64"
+  );
+
+  const response = await fetch("https://accounts.spotify.com/api/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${credentials}`,
+    },
+    body: "grant_type=client_credentials",
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(
+      `Spotify auth failed: ${response.status} ${response.statusText} ${text}`
+    );
+  }
+
+  const data = await response.json();
+
+  // Cache token (expires in ~1 hour; use a small buffer)
+  spotifyTokenCache.token = data.access_token;
+  spotifyTokenCache.expiresAt = now + (data.expires_in - 300) * 1000;
+
+  return data.access_token;
+}
 
 // Bandcamp metadata extraction endpoint
 app.get("/api/bandcamp-metadata", async (req, res) => {
@@ -58,7 +124,6 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
       artist: "",
       artistImage: "", // Artist profile image
       coverArt: "",
-      genre: "",
       audioUrl: "", // The actual audio stream URL
       duration: "", // Duration in HH:MM:SS format
     };
@@ -372,12 +437,6 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
       metadata.title = metadata.title.replace(/^\s*[^•]+•\s*/, "").trim();
     }
 
-    // Try to extract genre from tags or page
-    const genreTag = $(".tag a").first().text().trim();
-    if (genreTag) {
-      metadata.genre = genreTag;
-    }
-
     // Clean up cover art URL - ensure it's a full URL
     if (metadata.coverArt && !metadata.coverArt.startsWith("http")) {
       metadata.coverArt = new URL(metadata.coverArt, url).href;
@@ -486,7 +545,6 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
         artist: metadata.artist || (tralbumData && tralbumData.artist) || "",
         artistImage: metadata.artistImage || "",
         coverArt: metadata.coverArt || "",
-        genre: metadata.genre || "",
         tracks: allTracks,
         pageUrl: url,
       };
@@ -526,6 +584,126 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
     console.error("Error extracting Bandcamp metadata:", error);
     res.status(500).json({
       error: error.message || "Failed to extract metadata from Bandcamp URL",
+    });
+  }
+});
+
+// Spotify search endpoint (tracks only for now)
+app.get("/api/spotify-search", async (req, res) => {
+  try {
+    const { q, type = "track", limit = "25" } = req.query;
+
+    if (!q) {
+      return res.status(400).json({ error: "Query parameter 'q' is required" });
+    }
+
+    const accessToken = await getSpotifyAccessToken();
+
+    const searchUrl = new URL("https://api.spotify.com/v1/search");
+    searchUrl.searchParams.append("q", String(q));
+    searchUrl.searchParams.append("type", String(type));
+    searchUrl.searchParams.append("limit", String(limit));
+
+    const response = await fetch(searchUrl.toString(), {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(
+        `Spotify API error (search): ${response.status} ${response.statusText} ${text}`
+      );
+    }
+
+    const data = await response.json();
+    return res.json(data);
+  } catch (error) {
+    console.error("Error searching Spotify:", error);
+    return res.status(500).json({
+      error:
+        error instanceof Error ? error.message : "Failed to search Spotify",
+    });
+  }
+});
+
+// Spotify track lookup endpoint
+app.get("/api/spotify-track/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({ error: "Track ID is required" });
+    }
+
+    const accessToken = await getSpotifyAccessToken();
+
+    const response = await fetch(
+      `https://api.spotify.com/v1/tracks/${encodeURIComponent(id)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(
+        `Spotify API error (track): ${response.status} ${response.statusText} ${text}`
+      );
+    }
+
+    const data = await response.json();
+    return res.json(data);
+  } catch (error) {
+    console.error("Error fetching Spotify track:", error);
+    return res.status(500).json({
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to fetch track from Spotify",
+    });
+  }
+});
+
+// Spotify artist lookup endpoint (for validating artist images)
+app.get("/api/spotify-artist/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({ error: "Artist ID is required" });
+    }
+
+    const accessToken = await getSpotifyAccessToken();
+
+    const response = await fetch(
+      `https://api.spotify.com/v1/artists/${encodeURIComponent(id)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(
+        `Spotify API error (artist): ${response.status} ${response.statusText} ${text}`
+      );
+    }
+
+    const data = await response.json();
+    return res.json(data);
+  } catch (error) {
+    console.error("Error fetching Spotify artist:", error);
+    return res.status(500).json({
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to fetch artist from Spotify",
     });
   }
 });

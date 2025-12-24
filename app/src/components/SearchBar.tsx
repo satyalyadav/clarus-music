@@ -107,9 +107,6 @@ const SearchBar: React.FC = () => {
     } else if (result.type === 'artist' && result.id) {
       // Navigate to artist
       navigate(`/artists/${result.id}`);
-    } else if (result.type === 'genre' && result.id) {
-      // Navigate to genre
-      navigate(`/genres/${result.id}`);
     }
 
     setQuery("");
@@ -125,8 +122,6 @@ const SearchBar: React.FC = () => {
         return '💿';
       case 'artist':
         return '🎤';
-      case 'genre':
-        return '🎹';
       case 'playlist':
         return '🎶';
       default:

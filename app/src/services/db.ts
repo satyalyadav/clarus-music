@@ -6,7 +6,6 @@ export interface Song {
   title: string;
   artist_id: number;
   album_id?: number | null;
-  genre_id: number;
   duration: string; // HH:MM:SS format
   file_blob?: Blob; // Audio file stored as Blob
   file_handle?: FileSystemFileHandle; // Alternative: File System Access API handle
@@ -29,12 +28,6 @@ export interface Artist {
   artist_id?: number;
   name: string;
   image_url?: string | null;
-  created_at?: number;
-}
-
-export interface Genre {
-  genre_id?: number;
-  name: string;
   created_at?: number;
 }
 
@@ -62,7 +55,6 @@ class MusicLibraryDB extends Dexie {
   songs!: Table<Song, number>;
   albums!: Table<Album, number>;
   artists!: Table<Artist, number>;
-  genres!: Table<Genre, number>;
   playlists!: Table<Playlist, number>;
   playlistSongs!: Table<PlaylistSong, [number, number]>;
   songArtists!: Table<SongArtist, [number, number]>;
@@ -71,10 +63,9 @@ class MusicLibraryDB extends Dexie {
     super('MusicLibraryDB');
     
     this.version(1).stores({
-      songs: '++song_id, title, artist_id, album_id, genre_id, created_at',
+      songs: '++song_id, title, artist_id, album_id, created_at',
       albums: '++album_id, title, artist_id, created_at',
       artists: '++artist_id, name, created_at',
-      genres: '++genre_id, name, created_at',
       playlists: '++playlist_id, title, created_at',
       playlistSongs: '[playlist_id+song_id], playlist_id, song_id',
     });
@@ -91,12 +82,17 @@ class MusicLibraryDB extends Dexie {
 
     // Add url field to songs in version 4 (url is not indexed, just a field)
     this.version(4).stores({
-      songs: '++song_id, title, artist_id, album_id, genre_id, created_at',
+      songs: '++song_id, title, artist_id, album_id, created_at',
     });
 
     // Add bandcamp_page_url field to songs in version 5
     this.version(5).stores({
-      songs: '++song_id, title, artist_id, album_id, genre_id, created_at',
+      songs: '++song_id, title, artist_id, album_id, created_at',
+    });
+
+    // Remove genre_id from songs in version 6
+    this.version(6).stores({
+      songs: '++song_id, title, artist_id, album_id, created_at',
     });
   }
 }
@@ -134,7 +130,6 @@ export const songService = {
 
     const artistId = song.artist_id;
     const albumId = song.album_id;
-    const genreId = song.genre_id;
 
     // Get all artist IDs associated with this song (primary + secondary/featured)
     const associatedArtistIds = new Set<number>();
@@ -153,7 +148,7 @@ export const songService = {
     await db.songArtists.where('song_id').equals(id).delete();
     await db.songs.delete(id);
 
-    // Cascade delete: Check if artist, album, or genre should be deleted
+    // Cascade delete: Check if artist or album should be deleted
     // (only if no other songs reference them)
 
     // Check and delete all associated artists if no songs remain
@@ -180,14 +175,6 @@ export const songService = {
       const remainingSongsForAlbum = await db.songs.where('album_id').equals(albumId).count();
       if (remainingSongsForAlbum === 0) {
         await db.albums.delete(albumId);
-      }
-    }
-
-    // Check and delete genre if no songs remain
-    if (genreId) {
-      const remainingSongsForGenre = await db.songs.where('genre_id').equals(genreId).count();
-      if (remainingSongsForGenre === 0) {
-        await db.genres.delete(genreId);
       }
     }
   },
@@ -232,10 +219,6 @@ export const songService = {
 
   async getByAlbum(albumId: number): Promise<Song[]> {
     return await db.songs.where('album_id').equals(albumId).toArray();
-  },
-
-  async getByGenre(genreId: number): Promise<Song[]> {
-    return await db.songs.where('genre_id').equals(genreId).toArray();
   },
 };
 
@@ -315,39 +298,6 @@ export const artistService = {
       }
     }
     await db.artists.delete(id);
-  },
-};
-
-// Genre operations
-export const genreService = {
-  async getAll(): Promise<Genre[]> {
-    return await db.genres.toArray();
-  },
-
-  async getById(id: number): Promise<Genre | undefined> {
-    return await db.genres.get(id);
-  },
-
-  async create(genre: Omit<Genre, 'genre_id' | 'created_at'>): Promise<number> {
-    const now = Date.now();
-    const id = await db.genres.add({
-      ...genre,
-      created_at: now,
-    } as Genre);
-    return id as number;
-  },
-
-  async update(id: number, updates: Partial<Omit<Genre, 'genre_id'>>): Promise<void> {
-    await db.genres.update(id, updates);
-  },
-
-  async delete(id: number): Promise<void> {
-    // Check if any songs use this genre
-    const songs = await db.songs.where('genre_id').equals(id).toArray();
-    if (songs.length > 0) {
-      throw new Error('Cannot delete genre: songs are using it');
-    }
-    await db.genres.delete(id);
   },
 };
 
@@ -447,18 +397,15 @@ export interface SongWithRelations extends Song {
   artist_name?: string;
   album_title?: string;
   album_cover_image?: string | null;
-  genre_name?: string;
 }
 
 export async function getSongsWithRelations(): Promise<SongWithRelations[]> {
   const songs = await songService.getAll();
   const artists = await artistService.getAll();
   const albums = await albumService.getAll();
-  const genres = await genreService.getAll();
 
   const artistMap = new Map(artists.map(a => [a.artist_id, a.name]));
   const albumMap = new Map(albums.map(a => [a.album_id, a.title]));
-  const genreMap = new Map(genres.map(g => [g.genre_id, g.name]));
 
    // Load song-artist mappings for all songs in one go
   const songIds = songs
@@ -511,7 +458,6 @@ export async function getSongsWithRelations(): Promise<SongWithRelations[]> {
       return names.length > 0 ? names.join(', ') : artistMap.get(song.artist_id);
     })(),
     album_title: song.album_id ? albumMap.get(song.album_id) : undefined,
-    genre_name: genreMap.get(song.genre_id),
   }));
 }
 
@@ -578,17 +524,12 @@ export async function searchSongs(query: string): Promise<SongWithRelations[]> {
       return true;
     }
 
-    // Search in genre
-    if (song.genre_name && song.genre_name.toLowerCase().includes(searchTerm)) {
-      return true;
-    }
-
     return false;
   });
 }
 
 // Unified search result types
-export type SearchResultType = 'song' | 'album' | 'artist' | 'genre' | 'playlist';
+export type SearchResultType = 'song' | 'album' | 'artist' | 'playlist';
 
 export interface SearchResult {
   type: SearchResultType;
@@ -602,8 +543,6 @@ export interface SearchResult {
   album?: Album;
   // For artists
   artist?: Artist;
-  // For genres
-  genre?: Genre;
   // For playlists
   playlist?: Playlist;
 }
@@ -656,21 +595,6 @@ export async function searchAll(query: string): Promise<SearchResult[]> {
         subtitle: 'artist',
         image: artist.image_url,
         artist,
-      });
-    }
-  });
-
-  // Search genres
-  const genres = await genreService.getAll();
-  genres.forEach(genre => {
-    if (genre.name.toLowerCase().includes(searchTerm)) {
-      results.push({
-        type: 'genre',
-        id: genre.genre_id,
-        title: genre.name,
-        subtitle: 'genre',
-        image: null,
-        genre,
       });
     }
   });

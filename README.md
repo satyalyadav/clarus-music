@@ -8,7 +8,7 @@ Built with React, TypeScript, and IndexedDB. It originally started as a class pr
 This app uses **IndexedDB** (via Dexie.js) to store:
 
 - Audio files as Blobs
-- Song metadata (title, artist, album, genre, duration)
+- Song metadata (title, artist, album, duration)
 - Playlists and their song associations
 - All other library data
 
@@ -37,20 +37,27 @@ Everything is stored locally in your browser. Your music library is tied to the 
 
    This will install both frontend and backend dependencies.
 
-3. **Configure Spotify API (Optional - for artist images)**
+3. **Configure Spotify API (Required for song search and artist images)**
 
-   Artist images are automatically fetched from Spotify API in the background. To enable this feature:
+   The app uses Spotify API for song search and artist image validation. You need to set up Spotify credentials:
 
    - Register your app at [Spotify Developer Dashboard](https://developer.spotify.com/dashboard/)
    - Create a new app and get your Client ID and Client Secret
-   - Copy `app/.env.example` to `app/.env`
-   - Add your credentials to `app/.env`:
-     ```
-     VITE_SPOTIFY_CLIENT_ID=your_client_id
-     VITE_SPOTIFY_CLIENT_SECRET=your_client_secret
-     ```
 
-   **Note:** Without Spotify credentials, artist images won't be fetched, but the app will work normally with placeholder icons.
+   **Frontend Environment** (`app/.env`):
+
+   ```
+   VITE_SPOTIFY_CLIENT_ID=your_client_id
+   ```
+
+   **Backend Environment** (`app/backend/.env`):
+
+   ```
+   SPOTIFY_CLIENT_ID=your_client_id
+   SPOTIFY_CLIENT_SECRET=your_client_secret
+   ```
+
+   **Note:** The Client Secret should only be in the backend `.env` file (never exposed to the browser). Without Spotify credentials, song search and artist image features won't work.
 
 4. **Run the Application**
 
@@ -60,12 +67,12 @@ Everything is stored locally in your browser. Your music library is tied to the 
 
    This will start both the backend API server (on port 3000) and the Vite development server (on port 5173). Open your browser to the URL shown (typically `http://localhost:5173`).
 
-   **Note:** The backend server is required for Bandcamp URL metadata extraction. If you only need Apple Music search, you can run just the frontend with `npm run dev:frontend`.
+   **Note:** The backend server is required for Bandcamp URL metadata extraction and Spotify API calls. Both frontend and backend need to be running for full functionality.
 
 ## Usage
 
-1. **Add Songs**: Click "add song" and select audio files from your device. You can also paste Apple Music or Bandcamp URLs in the search field to automatically fill in song metadata (artist, album, cover art).
-2. **Organize**: Create albums, artists, genres, and playlists
+1. **Add Songs**: Click "add song" and select audio files from your device. You can also paste Spotify or Bandcamp URLs in the search field to automatically fill in song metadata (artist, album, cover art). For Spotify, you can also search by song name.
+2. **Organize**: Create albums, artists, and playlists
 3. **Play Music**: Click any song to start playing
 4. **Enjoy**: Your library persists in your browser - no login needed!
 
@@ -82,7 +89,7 @@ npm run build
 - **Build Tool**: Vite
 - **Routing**: React Router
 - **State Management**: React Context API
-- **External APIs**: Spotify Web API (for artist images), iTunes Search API (for song search)
+- **External APIs**: Spotify Web API (for song search and artist images), Bandcamp (for metadata extraction)
 - **Backend**: Express.js server for Bandcamp metadata extraction and audio streaming (runs on port 3000)
 
 ## Browser Compatibility
