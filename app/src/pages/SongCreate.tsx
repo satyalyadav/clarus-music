@@ -37,7 +37,7 @@ interface AlbumResult {
 
 type AddMode = "upload" | "bandcamp";
 
-const SongCreate: React.FC = () => {
+const SongCreate = (): React.ReactElement => {
   const navigate = useNavigate();
   const [addMode, setAddMode] = useState<AddMode>("upload"); // Default to upload
   const [title, setTitle] = useState("");
@@ -71,22 +71,22 @@ const SongCreate: React.FC = () => {
   const [showAlbumSelection, setShowAlbumSelection] = useState(false);
 
   useEffect(() => {
-    Promise.all([
-      albumService.getAll(),
-      artistService.getAll(),
-    ]).then(([albums, artists]) => {
-      // Filter out items without IDs since the UI requires them
-      setAlbums(
-        albums.filter(
-          (a): a is Album & { album_id: number } => a.album_id !== undefined
-        )
-      );
-      setArtists(
-        artists.filter(
-          (a): a is Artist & { artist_id: number } => a.artist_id !== undefined
-        )
-      );
-    });
+    Promise.all([albumService.getAll(), artistService.getAll()]).then(
+      ([albums, artists]) => {
+        // Filter out items without IDs since the UI requires them
+        setAlbums(
+          albums.filter(
+            (a): a is Album & { album_id: number } => a.album_id !== undefined
+          )
+        );
+        setArtists(
+          artists.filter(
+            (a): a is Artist & { artist_id: number } =>
+              a.artist_id !== undefined
+          )
+        );
+      }
+    );
   }, []);
 
   // Check if input is a Bandcamp URL
@@ -258,7 +258,7 @@ const SongCreate: React.FC = () => {
     searchTimeoutRef.current = setTimeout(async () => {
       setSearchLoading(true);
       setError(null);
-      
+
       try {
         if (addMode === "bandcamp") {
           // Bandcamp mode:
@@ -269,9 +269,7 @@ const SongCreate: React.FC = () => {
             if (result === null) {
               // It's an album - fetch the album data separately
               const response = await fetch(
-                `/api/bandcamp-metadata?url=${encodeURIComponent(
-                  trimmedQuery
-                )}`
+                `/api/bandcamp-metadata?url=${encodeURIComponent(trimmedQuery)}`
               );
               if (!response.ok) {
                 throw new Error("Failed to fetch album data");
@@ -326,17 +324,51 @@ const SongCreate: React.FC = () => {
               throw new Error("Failed to search Bandcamp");
             }
             const data = await response.json();
-            const results: SearchResult[] = (data.results || []).map(
-              (item: any) => ({
-                title: item.title || "",
-                album: "", // Don't show album in subtitle - for albums it's redundant, for tracks we don't have it
-                artist: item.artist || "",
-                coverArt: item.coverArt || "",
-                raw: {
-                  ...item,
-                },
-              })
+
+            // Map results and fetch missing cover art for albums
+            const resultsPromises = (data.results || []).map(
+              async (item: any) => {
+                let coverArt = item.coverArt || "";
+
+                // If it's an album and we don't have cover art, try to fetch it from metadata
+                if (item.type === "album" && !coverArt && item.url) {
+                  try {
+                    const metaResp = await fetch(
+                      `/api/bandcamp-metadata?url=${encodeURIComponent(
+                        item.url
+                      )}`
+                    );
+                    if (metaResp.ok) {
+                      const meta = await metaResp.json();
+                      if (meta.coverArt) {
+                        coverArt = meta.coverArt;
+                      }
+                    }
+                  } catch (e) {
+                    // Silently fail - we'll just show without cover art
+                    if (import.meta.env.DEV) {
+                      console.warn(
+                        "Failed to fetch cover art for album:",
+                        item.url,
+                        e
+                      );
+                    }
+                  }
+                }
+
+                return {
+                  title: item.title || "",
+                  album: "", // Don't show album in subtitle - for albums it's redundant, for tracks we don't have it
+                  artist: item.artist || "",
+                  coverArt: coverArt,
+                  raw: {
+                    ...item,
+                  },
+                };
+              }
             );
+
+            const results = await Promise.all(resultsPromises);
 
             setAlbumResult(null);
             setShowAlbumSelection(false);
@@ -422,10 +454,10 @@ const SongCreate: React.FC = () => {
       } catch (err: any) {
         console.error("Search error:", err);
         setError(
-          err.message || 
-          (addMode === "bandcamp" 
-            ? "Failed to extract metadata from Bandcamp URL"
-            : "Failed to search Spotify")
+          err.message ||
+            (addMode === "bandcamp"
+              ? "Failed to extract metadata from Bandcamp URL"
+              : "Failed to search Spotify")
         );
         setSearchResults([]);
       } finally {
@@ -439,7 +471,6 @@ const SongCreate: React.FC = () => {
       }
     };
   }, [searchQuery, addMode]);
-
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -551,12 +582,17 @@ const SongCreate: React.FC = () => {
           audioStreamUrl.includes(".ogg") ||
           audioStreamUrl.includes(".flac"));
 
-      if (isValidAudioUrl) {
+      if (isValidAudioUrl && audioStreamUrl) {
         setSongUrl(audioStreamUrl);
         // Store the original page URL (prefer pageUrl from metadata, then from result, then url)
-        const pageUrl = bandcampMetadata?.pageUrl || result.raw.pageUrl || result.raw.url;
+        const pageUrl =
+          bandcampMetadata?.pageUrl ||
+          result.raw.pageUrl ||
+          result.raw.url ||
+          "";
         setBandcampPageUrl(pageUrl);
         setFile(null); // Clear file when URL is set
+
         if (import.meta.env.DEV) {
           console.log("Stored valid Bandcamp audio URL:", audioStreamUrl);
           console.log("Stored Bandcamp page URL:", pageUrl);
@@ -583,21 +619,22 @@ const SongCreate: React.FC = () => {
 
     try {
       // For Bandcamp results, only use the primary artist (no featured artists parsing)
-      const isBandcampResult =
-        result.raw?.url && isBandcampUrl(result.raw.url);
-      
+      const isBandcampResult = result.raw?.url && isBandcampUrl(result.raw.url);
+
       // Use metadata from Bandcamp if available (more accurate than search results)
       let bandcampArtist = result.artist;
       let bandcampAlbum = result.album;
       let bandcampArtistImage = result.artistImage;
       let bandcampCoverArt = result.coverArt;
-      
+
       if (isBandcampResult && bandcampMetadata) {
         // Use artist from metadata if available, and clean it
         if (bandcampMetadata.artist) {
           bandcampArtist = bandcampMetadata.artist;
           // Clean up artist name: remove patterns like "from [album] by [artist]" -> "[artist]"
-          bandcampArtist = bandcampArtist.replace(/^from\s+.+?\s+by\s+/i, "").trim();
+          bandcampArtist = bandcampArtist
+            .replace(/^from\s+.+?\s+by\s+/i, "")
+            .trim();
         }
         // Use album from metadata if available
         if (bandcampMetadata.album) {
@@ -612,9 +649,9 @@ const SongCreate: React.FC = () => {
           bandcampCoverArt = bandcampMetadata.coverArt;
         }
       }
-      
+
       let effectiveNames: string[] = [];
-      
+
       if (isBandcampResult) {
         // For Bandcamp, always use only the primary artist (no featured artists)
         if (bandcampArtist) {
@@ -635,7 +672,7 @@ const SongCreate: React.FC = () => {
             : result.artist
             ? [result.artist]
             : [];
-        
+
         if (import.meta.env.DEV) {
           console.log("Parsed artists from Spotify result:", {
             rawArtist: result.artist,
@@ -686,40 +723,48 @@ const SongCreate: React.FC = () => {
           const artistNameToIdMap: Map<string, string> =
             result.raw?.artistNameToIdMap || new Map();
 
-          const imageUpdatePromises = effectiveNames.map(async (artistName, index) => {
-            const dbArtistId = allArtistIds[index];
-            if (!dbArtistId) return;
+          const imageUpdatePromises = effectiveNames.map(
+            async (artistName, index) => {
+              const dbArtistId = allArtistIds[index];
+              if (!dbArtistId) return;
 
-            // Try to find Spotify ID by artist name (most reliable)
-            let spotifyArtistId: string | undefined = artistNameToIdMap.get(artistName);
-            
-            // Fallback to index-based matching if name lookup fails
-            if (!spotifyArtistId && index < spotifyArtistIds.length) {
-              spotifyArtistId = spotifyArtistIds[index];
-            }
+              // Try to find Spotify ID by artist name (most reliable)
+              let spotifyArtistId: string | undefined =
+                artistNameToIdMap.get(artistName);
 
-            if (spotifyArtistId) {
-              try {
-                const validatedImageUrl = await validateAndGetArtistImage(spotifyArtistId);
-                if (validatedImageUrl) {
-                  await artistService.update(dbArtistId, {
-                    image_url: validatedImageUrl,
-                  });
-                  // Update local state
-                  setArtists((prev) =>
-                    prev.map((a) =>
-                      a.artist_id === dbArtistId
-                        ? { ...a, image_url: validatedImageUrl }
-                        : a
-                    )
+              // Fallback to index-based matching if name lookup fails
+              if (!spotifyArtistId && index < spotifyArtistIds.length) {
+                spotifyArtistId = spotifyArtistIds[index];
+              }
+
+              if (spotifyArtistId) {
+                try {
+                  const validatedImageUrl = await validateAndGetArtistImage(
+                    spotifyArtistId
                   );
+                  if (validatedImageUrl) {
+                    await artistService.update(dbArtistId, {
+                      image_url: validatedImageUrl,
+                    });
+                    // Update local state
+                    setArtists((prev) =>
+                      prev.map((a) =>
+                        a.artist_id === dbArtistId
+                          ? { ...a, image_url: validatedImageUrl }
+                          : a
+                      )
+                    );
+                  }
+                } catch (err) {
+                  console.error(
+                    `Error updating artist image from Spotify for "${artistName}":`,
+                    err
+                  );
+                  // Don't fail the whole operation if image validation fails
                 }
-              } catch (err) {
-                console.error(`Error updating artist image from Spotify for "${artistName}":`, err);
-                // Don't fail the whole operation if image validation fails
               }
             }
-          });
+          );
 
           // Wait for all image updates to complete (but don't block on errors)
           await Promise.allSettled(imageUpdatePromises);
@@ -763,13 +808,14 @@ const SongCreate: React.FC = () => {
           // Update album cover image if it's missing but we have one from the metadata
           if (!album.cover_image && bandcampCoverArt) {
             try {
-              await albumService.update(album.album_id!, {
+              const currentAlbumId = album.album_id!;
+              await albumService.update(currentAlbumId, {
                 cover_image: bandcampCoverArt,
               });
               // Update local state
               setAlbums((prev) =>
                 prev.map((a) =>
-                  a.album_id === album.album_id
+                  a.album_id === currentAlbumId
                     ? { ...a, cover_image: bandcampCoverArt }
                     : a
                 )
@@ -856,14 +902,15 @@ const SongCreate: React.FC = () => {
 
       // Associate artists with this song (many-to-many)
       const primaryId = parseInt(artistId);
-      
+
       // For Bandcamp songs, only use the primary artist (no featured artists)
       // For other sources (Spotify, file uploads), use all detected artists
-      const isBandcampSong = !!bandcampPageUrl || (songUrl && isBandcampUrl(songUrl));
+      const isBandcampSong =
+        !!bandcampPageUrl || (songUrl && isBandcampUrl(songUrl));
       const artistIdsToAssociate = isBandcampSong
         ? [primaryId] // Only primary artist for Bandcamp
         : Array.from(new Set([primaryId, ...selectedArtistIds])); // All artists for others
-      
+
       if (import.meta.env.DEV) {
         console.log("Associating song with artists:", {
           songId: newSongId,
@@ -873,8 +920,11 @@ const SongCreate: React.FC = () => {
           isBandcampSong,
         });
       }
-      
-      await songArtistService.setArtistsForSong(newSongId, artistIdsToAssociate);
+
+      await songArtistService.setArtistsForSong(
+        newSongId,
+        artistIdsToAssociate
+      );
 
       navigate("/songs");
     } catch (err: any) {
@@ -890,7 +940,7 @@ const SongCreate: React.FC = () => {
       setError("Please select at least one track with a valid audio URL");
       return;
     }
-    
+
     // Filter out tracks without valid audio URLs from selection
     const validSelectedTracks = Array.from(selectedTracks).filter((index) => {
       const track = albumResult.tracks[index];
@@ -903,9 +953,11 @@ const SongCreate: React.FC = () => {
           track.audioUrl.includes(".flac"));
       return isValidAudioUrl;
     });
-    
+
     if (validSelectedTracks.length === 0) {
-      setError("No tracks with valid audio URLs selected. Please select tracks that have audio available.");
+      setError(
+        "No tracks with valid audio URLs selected. Please select tracks that have audio available."
+      );
       return;
     }
 
@@ -992,7 +1044,9 @@ const SongCreate: React.FC = () => {
               track.audioUrl.includes(".flac"));
 
           if (!isValidAudioUrl) {
-            console.warn(`Skipping track "${track.title}" - no valid audio URL`);
+            console.warn(
+              `Skipping track "${track.title}" - no valid audio URL`
+            );
             errorCount++;
             // Don't continue silently - show which tracks failed
             continue;
@@ -1009,7 +1063,9 @@ const SongCreate: React.FC = () => {
           });
 
           // Associate only the primary artist with this song (Bandcamp doesn't list featured artists)
-          await songArtistService.setArtistsForSong(newSongId, [primaryArtistId]);
+          await songArtistService.setArtistsForSong(newSongId, [
+            primaryArtistId,
+          ]);
           successCount++;
         } catch (err: any) {
           console.error(`Failed to create song "${track.title}":`, err);
@@ -1029,7 +1085,11 @@ const SongCreate: React.FC = () => {
         }
       } else {
         setError(
-          `Failed to add tracks. ${errorCount > 0 ? `${errorCount} track(s) had errors - some tracks may not have valid audio URLs available from Bandcamp.` : ""}`
+          `Failed to add tracks. ${
+            errorCount > 0
+              ? `${errorCount} track(s) had errors - some tracks may not have valid audio URLs available from Bandcamp.`
+              : ""
+          }`
         );
       }
     } catch (err: any) {
@@ -1055,7 +1115,7 @@ const SongCreate: React.FC = () => {
   // Select/deselect all tracks (only tracks with valid audio URLs)
   const toggleSelectAll = () => {
     if (!albumResult) return;
-    
+
     // Get all valid track indices
     const validTrackIndices = albumResult.tracks
       .map((track, index) => {
@@ -1068,11 +1128,11 @@ const SongCreate: React.FC = () => {
         return isValidAudioUrl ? index : null;
       })
       .filter((index): index is number => index !== null);
-    
+
     const validSelectedCount = Array.from(selectedTracks).filter((index) =>
       validTrackIndices.includes(index)
     ).length;
-    
+
     if (validSelectedCount === validTrackIndices.length) {
       // Deselect all
       setSelectedTracks(new Set());
@@ -1121,7 +1181,9 @@ const SongCreate: React.FC = () => {
               <h2 style={{ margin: "0 0 8px 0", color: "var(--text-primary)" }}>
                 {albumResult.album}
               </h2>
-              <div style={{ color: "var(--text-secondary)", marginBottom: "4px" }}>
+              <div
+                style={{ color: "var(--text-secondary)", marginBottom: "4px" }}
+              >
                 {albumResult.artist}
               </div>
               <div
@@ -1131,7 +1193,8 @@ const SongCreate: React.FC = () => {
                   marginTop: "8px",
                 }}
               >
-                {albumResult.tracks.length} track{albumResult.tracks.length !== 1 ? "s" : ""}
+                {albumResult.tracks.length} track
+                {albumResult.tracks.length !== 1 ? "s" : ""}
               </div>
             </div>
           </div>
@@ -1162,8 +1225,8 @@ const SongCreate: React.FC = () => {
                     return isValidAudioUrl ? index : null;
                   })
                   .filter((index): index is number => index !== null);
-                const validSelectedCount = Array.from(selectedTracks).filter((index) =>
-                  validTrackIndices.includes(index)
+                const validSelectedCount = Array.from(selectedTracks).filter(
+                  (index) => validTrackIndices.includes(index)
                 ).length;
                 return validSelectedCount === validTrackIndices.length
                   ? "Deselect All"
@@ -1189,17 +1252,19 @@ const SongCreate: React.FC = () => {
                       track.audioUrl.includes(".flac"));
                   return isValidAudioUrl;
                 }).length;
-                const validSelectedCount = Array.from(selectedTracks).filter((index) => {
-                  const track = albumResult.tracks[index];
-                  if (!track) return false;
-                  const isValidAudioUrl =
-                    track.audioUrl &&
-                    (track.audioUrl.includes("bcbits.com") ||
-                      track.audioUrl.includes(".mp3") ||
-                      track.audioUrl.includes(".ogg") ||
-                      track.audioUrl.includes(".flac"));
-                  return isValidAudioUrl;
-                }).length;
+                const validSelectedCount = Array.from(selectedTracks).filter(
+                  (index) => {
+                    const track = albumResult.tracks[index];
+                    if (!track) return false;
+                    const isValidAudioUrl =
+                      track.audioUrl &&
+                      (track.audioUrl.includes("bcbits.com") ||
+                        track.audioUrl.includes(".mp3") ||
+                        track.audioUrl.includes(".ogg") ||
+                        track.audioUrl.includes(".flac"));
+                    return isValidAudioUrl;
+                  }
+                ).length;
                 return `${validSelectedCount} of ${validTrackCount} available selected`;
               })()}
             </div>
@@ -1219,7 +1284,7 @@ const SongCreate: React.FC = () => {
                   track.audioUrl.includes(".mp3") ||
                   track.audioUrl.includes(".ogg") ||
                   track.audioUrl.includes(".flac"));
-              
+
               return (
                 <div
                   key={index}
@@ -1251,10 +1316,14 @@ const SongCreate: React.FC = () => {
                   <input
                     type="checkbox"
                     checked={selectedTracks.has(index)}
-                    onChange={() => isValidAudioUrl && toggleTrackSelection(index)}
+                    onChange={() =>
+                      isValidAudioUrl && toggleTrackSelection(index)
+                    }
                     onClick={(e) => e.stopPropagation()}
                     disabled={!isValidAudioUrl}
-                    style={{ cursor: isValidAudioUrl ? "pointer" : "not-allowed" }}
+                    style={{
+                      cursor: isValidAudioUrl ? "pointer" : "not-allowed",
+                    }}
                   />
                   <div
                     style={{
@@ -1264,12 +1333,17 @@ const SongCreate: React.FC = () => {
                   >
                     <div
                       style={{
-                        fontWeight: selectedTracks.has(index) ? "bold" : "normal",
-                        color: isValidAudioUrl ? "var(--text-primary)" : "var(--text-muted)",
+                        fontWeight: selectedTracks.has(index)
+                          ? "bold"
+                          : "normal",
+                        color: isValidAudioUrl
+                          ? "var(--text-primary)"
+                          : "var(--text-muted)",
                         marginBottom: "4px",
                       }}
                     >
-                      {track.trackNumber}. {track.title || `Track ${track.trackNumber}`}
+                      {track.trackNumber}.{" "}
+                      {track.title || `Track ${track.trackNumber}`}
                       {!isValidAudioUrl && (
                         <span
                           style={{
@@ -1308,19 +1382,19 @@ const SongCreate: React.FC = () => {
               {loading
                 ? "Adding..."
                 : (() => {
-                    const validSelectedCount = Array.from(selectedTracks).filter(
-                      (index) => {
-                        const track = albumResult.tracks[index];
-                        if (!track) return false;
-                        const isValidAudioUrl =
-                          track.audioUrl &&
-                          (track.audioUrl.includes("bcbits.com") ||
-                            track.audioUrl.includes(".mp3") ||
-                            track.audioUrl.includes(".ogg") ||
-                            track.audioUrl.includes(".flac"));
-                        return isValidAudioUrl;
-                      }
-                    ).length;
+                    const validSelectedCount = Array.from(
+                      selectedTracks
+                    ).filter((index) => {
+                      const track = albumResult.tracks[index];
+                      if (!track) return false;
+                      const isValidAudioUrl =
+                        track.audioUrl &&
+                        (track.audioUrl.includes("bcbits.com") ||
+                          track.audioUrl.includes(".mp3") ||
+                          track.audioUrl.includes(".ogg") ||
+                          track.audioUrl.includes(".flac"));
+                      return isValidAudioUrl;
+                    }).length;
 
                     return `Add ${validSelectedCount} Track${
                       validSelectedCount !== 1 ? "s" : ""
@@ -1400,14 +1474,14 @@ const SongCreate: React.FC = () => {
               style={{ position: "relative" }}
             >
               <label className="form-label">//search song</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="type song name or paste Spotify link..."
-                  onFocus={() => searchResults.length > 0 && setShowResults(true)}
-                />
+              <input
+                type="text"
+                className="form-input"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="type song name or paste Spotify link..."
+                onFocus={() => searchResults.length > 0 && setShowResults(true)}
+              />
               {showResults && searchResults.length > 0 && (
                 <div
                   style={{
@@ -1455,7 +1529,8 @@ const SongCreate: React.FC = () => {
                             "var(--button-hover)";
                         }}
                         onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = "var(--card-bg)";
+                          e.currentTarget.style.backgroundColor =
+                            "var(--card-bg)";
                         }}
                       >
                         {result.coverArt && (
@@ -1479,32 +1554,35 @@ const SongCreate: React.FC = () => {
                           >
                             {result.title || "Unknown"}
                           </div>
-                        <div
-                          style={{
-                            fontSize: "0.9em",
-                            color: "var(--text-secondary)",
-                          }}
-                        >
-                          {result.artist || "Unknown Artist"}
-                          {result.raw?.type && isBandcampUrl(result.raw?.url || "") && (
-                            <span
-                              style={{
-                                textTransform: "capitalize",
-                                marginLeft: "6px",
-                                padding: "2px 6px",
-                                backgroundColor: "var(--card-bg, rgba(255, 255, 255, 0.1))",
-                                border: "1px solid var(--border-color, rgba(255, 255, 255, 0.2))",
-                                borderRadius: "3px",
-                                fontSize: "0.85em",
-                                color: "var(--text-primary)",
-                              }}
-                            >
-                              {result.raw.type}
-                            </span>
-                          )}
-                          {result.album && ` • ${result.album}`}
+                          <div
+                            style={{
+                              fontSize: "0.9em",
+                              color: "var(--text-secondary)",
+                            }}
+                          >
+                            {result.artist || "Unknown Artist"}
+                            {result.raw?.type &&
+                              isBandcampUrl(result.raw?.url || "") && (
+                                <span
+                                  style={{
+                                    textTransform: "capitalize",
+                                    marginLeft: "6px",
+                                    padding: "2px 6px",
+                                    backgroundColor:
+                                      "var(--card-bg, rgba(255, 255, 255, 0.1))",
+                                    border:
+                                      "1px solid var(--border-color, rgba(255, 255, 255, 0.2))",
+                                    borderRadius: "3px",
+                                    fontSize: "0.85em",
+                                    color: "var(--text-primary)",
+                                  }}
+                                >
+                                  {result.raw.type}
+                                </span>
+                              )}
+                            {result.album && ` • ${result.album}`}
+                          </div>
                         </div>
-                      </div>
                       </div>
                     ))}
                 </div>
@@ -1683,22 +1761,25 @@ const SongCreate: React.FC = () => {
                           }}
                         >
                           {result.artist}
-                          {result.raw?.type && isBandcampUrl(result.raw?.url || "") && (
-                            <span
-                              style={{
-                                textTransform: "capitalize",
-                                marginLeft: "6px",
-                                padding: "2px 6px",
-                                backgroundColor: "var(--card-bg, rgba(255, 255, 255, 0.1))",
-                                border: "1px solid var(--border-color, rgba(255, 255, 255, 0.2))",
-                                borderRadius: "3px",
-                                fontSize: "0.85em",
-                                color: "var(--text-primary)",
-                              }}
-                            >
-                              {result.raw.type}
-                            </span>
-                          )}
+                          {result.raw?.type &&
+                            isBandcampUrl(result.raw?.url || "") && (
+                              <span
+                                style={{
+                                  textTransform: "capitalize",
+                                  marginLeft: "6px",
+                                  padding: "2px 6px",
+                                  backgroundColor:
+                                    "var(--card-bg, rgba(255, 255, 255, 0.1))",
+                                  border:
+                                    "1px solid var(--border-color, rgba(255, 255, 255, 0.2))",
+                                  borderRadius: "3px",
+                                  fontSize: "0.85em",
+                                  color: "var(--text-primary)",
+                                }}
+                              >
+                                {result.raw.type}
+                              </span>
+                            )}
                         </div>
                       </div>
                     </div>
@@ -1788,7 +1869,8 @@ const SongCreate: React.FC = () => {
                           "var(--button-hover)";
                       }}
                       onMouseLeave={(e) => {
-                        e.currentTarget.style.backgroundColor = "var(--card-bg)";
+                        e.currentTarget.style.backgroundColor =
+                          "var(--card-bg)";
                       }}
                     >
                       {result.coverArt && (
@@ -1819,22 +1901,25 @@ const SongCreate: React.FC = () => {
                           }}
                         >
                           {result.artist || "Unknown Artist"}
-                          {result.raw?.type && isBandcampUrl(result.raw?.url || "") && (
-                            <span
-                              style={{
-                                textTransform: "capitalize",
-                                marginLeft: "6px",
-                                padding: "2px 6px",
-                                backgroundColor: "var(--card-bg, rgba(255, 255, 255, 0.1))",
-                                border: "1px solid var(--border-color, rgba(255, 255, 255, 0.2))",
-                                borderRadius: "3px",
-                                fontSize: "0.85em",
-                                color: "var(--text-primary)",
-                              }}
-                            >
-                              {result.raw.type}
-                            </span>
-                          )}
+                          {result.raw?.type &&
+                            isBandcampUrl(result.raw?.url || "") && (
+                              <span
+                                style={{
+                                  textTransform: "capitalize",
+                                  marginLeft: "6px",
+                                  padding: "2px 6px",
+                                  backgroundColor:
+                                    "var(--card-bg, rgba(255, 255, 255, 0.1))",
+                                  border:
+                                    "1px solid var(--border-color, rgba(255, 255, 255, 0.2))",
+                                  borderRadius: "3px",
+                                  fontSize: "0.85em",
+                                  color: "var(--text-primary)",
+                                }}
+                              >
+                                {result.raw.type}
+                              </span>
+                            )}
                           {result.album && ` • ${result.album}`}
                         </div>
                       </div>
@@ -1849,7 +1934,9 @@ const SongCreate: React.FC = () => {
           <>
             <div className="form-group">
               <label className="form-label">//title</label>
-              <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+              <div
+                style={{ display: "flex", gap: "12px", alignItems: "center" }}
+              >
                 {coverImage && (
                   <img
                     src={coverImage}
@@ -1952,7 +2039,8 @@ const SongCreate: React.FC = () => {
                       marginBottom: "4px",
                     }}
                   >
-                    {artists.find((a) => a.artist_id?.toString() === artistId)?.name || "Unknown Artist"}
+                    {artists.find((a) => a.artist_id?.toString() === artistId)
+                      ?.name || "Unknown Artist"}
                   </div>
                   {albums.find((a) => a.album_id?.toString() === albumId) && (
                     <div
@@ -1961,7 +2049,10 @@ const SongCreate: React.FC = () => {
                         fontSize: "0.9em",
                       }}
                     >
-                      {albums.find((a) => a.album_id?.toString() === albumId)?.title}
+                      {
+                        albums.find((a) => a.album_id?.toString() === albumId)
+                          ?.title
+                      }
                     </div>
                   )}
                 </div>
@@ -1971,12 +2062,13 @@ const SongCreate: React.FC = () => {
         )}
 
         <div style={{ display: "flex", gap: "12px", marginTop: "24px" }}>
-          <button 
-            type="submit" 
-            className="btn btn-primary" 
+          <button
+            type="submit"
+            className="btn btn-primary"
             disabled={
-              loading || 
-              (addMode === "bandcamp" && (searchLoading || !songUrl || !title.trim() || !artistId))
+              loading ||
+              (addMode === "bandcamp" &&
+                (searchLoading || !songUrl || !title.trim() || !artistId))
             }
           >
             {loading

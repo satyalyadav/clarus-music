@@ -716,11 +716,52 @@ app.get("/api/bandcamp-search", async (req, res) => {
           url = `https://bandcamp.com${url}`;
         }
 
-        // Cover image
-        let coverArt =
-          $el.find("img").attr("src") || $el.find("img").attr("data-src") || "";
-        if (coverArt && coverArt.startsWith("//")) {
-          coverArt = `https:${coverArt}`;
+        // Cover image - try multiple selectors to find the album/track cover
+        let coverArt = "";
+
+        // Try specific selectors for album/track covers first
+        const coverSelectors = [
+          ".art img", // Common album art container
+          ".popupImage", // Popup image (often the cover)
+          "img.popupImage", // Popup image as img tag
+          ".item-art img", // Item art container
+          ".result-art img", // Result art container
+          "img[itemprop='image']", // Structured data image
+          "img", // Fallback to any image
+        ];
+
+        for (const selector of coverSelectors) {
+          const img = $el.find(selector).first();
+          if (img.length) {
+            coverArt =
+              img.attr("src") ||
+              img.attr("data-src") ||
+              img.attr("data-original") ||
+              "";
+            if (coverArt) {
+              // Skip very small images (likely icons) - covers are usually at least 100px
+              const width = parseInt(img.attr("width") || "0");
+              const height = parseInt(img.attr("height") || "0");
+              if (width > 50 && height > 50) {
+                break;
+              }
+              // If no size attributes, still use it (might be responsive)
+              if (width === 0 && height === 0) {
+                break;
+              }
+              // If too small, continue searching
+              coverArt = "";
+            }
+          }
+        }
+
+        // Make sure it's a full URL
+        if (coverArt) {
+          if (coverArt.startsWith("//")) {
+            coverArt = `https:${coverArt}`;
+          } else if (coverArt.startsWith("/")) {
+            coverArt = `https://bandcamp.com${coverArt}`;
+          }
         }
 
         // Skip results we can't use: must have title, URL, and be album or track
