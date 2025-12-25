@@ -336,6 +336,13 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
         "";
     }
 
+    // Clean up artist name: remove patterns like "from [album] by [artist]" -> "[artist]"
+    if (metadata.artist) {
+      metadata.artist = metadata.artist
+        .replace(/^from\s+.+?\s+by\s+/i, "")
+        .trim();
+    }
+
     if (!metadata.coverArt) {
       metadata.coverArt =
         $('meta[property="og:image"]').attr("content") ||
@@ -418,14 +425,26 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
 
     // Extract album name if it's a track page
     if (!metadata.album) {
-      const albumLink = $('a[href*="/album/"]');
-      if (albumLink.length) {
-        metadata.album = albumLink.text().trim();
+      // First try to get from tralbumData (most reliable)
+      if (
+        tralbumData &&
+        tralbumData.current &&
+        tralbumData.current.album_title
+      ) {
+        metadata.album = tralbumData.current.album_title;
       } else {
-        // Try to get from URL structure
-        const albumMatch = url.match(/album\/([^/?#]+)/);
-        if (albumMatch) {
-          metadata.album = decodeURIComponent(albumMatch[1].replace(/-/g, " "));
+        // Try to find album link in the page
+        const albumLink = $('a[href*="/album/"]');
+        if (albumLink.length) {
+          metadata.album = albumLink.text().trim();
+        } else {
+          // Try to get from URL structure
+          const albumMatch = url.match(/album\/([^/?#]+)/);
+          if (albumMatch) {
+            metadata.album = decodeURIComponent(
+              albumMatch[1].replace(/-/g, " ")
+            );
+          }
         }
       }
     }
@@ -584,6 +603,153 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
     console.error("Error extracting Bandcamp metadata:", error);
     res.status(500).json({
       error: error.message || "Failed to extract metadata from Bandcamp URL",
+    });
+  }
+});
+
+// Bandcamp search endpoint (albums and tracks) - HTML scraping
+app.get("/api/bandcamp-search", async (req, res) => {
+  try {
+    const q = (req.query.q || "").toString().trim();
+
+    if (!q) {
+      return res.status(400).json({ error: "Query parameter 'q' is required" });
+    }
+
+    // Basic rate/abuse protection: limit length
+    if (q.length > 200) {
+      return res.status(400).json({ error: "Query too long" });
+    }
+
+    // Use Bandcamp search page - this is HTML, not an official API
+    const searchUrl = `https://bandcamp.com/search?q=${encodeURIComponent(q)}`;
+
+    if (process.env.NODE_ENV !== "production") {
+      console.log("Bandcamp search URL:", searchUrl);
+    }
+
+    const response = await fetch(searchUrl, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+      },
+    });
+
+    if (!response.ok) {
+      return res.status(500).json({
+        error: `Failed to search Bandcamp: ${response.status} ${response.statusText}`,
+      });
+    }
+
+    const html = await response.text();
+    const $ = cheerio.load(html);
+
+    const results = [];
+
+    // Bandcamp search results are typically under .result-items or .searchresult
+    // This may change over time, so be defensive.
+    $(".result-items .searchresult, .result-items .result, .searchresult").each(
+      (i, el) => {
+        const $el = $(el);
+
+        // Try to determine type (album/track/etc.)
+        const typeText =
+          $el.find(".itemtype, .type, .result-info .item-type").text() || "";
+        let itemType = "unknown";
+        if (/album/i.test(typeText)) itemType = "album";
+        else if (/track|song/i.test(typeText)) itemType = "track";
+        else if (/artist|band/i.test(typeText)) itemType = "artist";
+
+        // Title (extract and clean)
+        let title =
+          $el
+            .find(".heading, .result-info .heading, .track-title")
+            .text()
+            .trim() || "";
+
+        // Clean up title first
+        if (title) {
+          // Normalize whitespace
+          title = title.replace(/\s+/g, " ").trim();
+
+          // If title contains a bullet/dot separator, take only the first part
+          // Various bullet characters: · • ‧ ●
+          title = title.split(/[·•‧●]/)[0].trim();
+
+          // Remove "by Artist Name" pattern (case insensitive)
+          title = title.replace(/\s+by\s+.+$/i, "").trim();
+        }
+
+        // Artist (may include leading 'by ' and album name; we'll clean it)
+        let artist =
+          $el
+            .find(
+              ".subhead, .result-info .subhead, .artist, .subtext, .band-name"
+            )
+            .text()
+            .trim() || "";
+
+        if (artist) {
+          // Normalize whitespace (Bandcamp often has extra whitespace/newlines)
+          artist = artist.replace(/\s+/g, " ").trim();
+
+          // Drop everything after the first bullet/dot separator
+          // Various bullet characters: · • ‧ ●
+          artist = artist.split(/[·•‧●]/)[0].trim();
+
+          // Drop leading "by "
+          artist = artist.replace(/^by\s+/i, "").trim();
+
+          // For albums, if artist still contains the album name at the end, remove it
+          if (
+            itemType === "album" &&
+            title &&
+            artist.toLowerCase().endsWith(title.toLowerCase())
+          ) {
+            artist = artist.slice(0, -title.length).trim();
+          }
+        }
+
+        // URL
+        let url = $el.find("a.item-link, a.searchresult, a").attr("href") || "";
+        if (url && url.startsWith("/")) {
+          url = `https://bandcamp.com${url}`;
+        }
+
+        // Cover image
+        let coverArt =
+          $el.find("img").attr("src") || $el.find("img").attr("data-src") || "";
+        if (coverArt && coverArt.startsWith("//")) {
+          coverArt = `https:${coverArt}`;
+        }
+
+        // Skip results we can't use: must have title, URL, and be album or track
+        if (!title || !url || (itemType !== "album" && itemType !== "track")) {
+          return;
+        }
+
+        results.push({
+          title,
+          artist,
+          type: itemType,
+          url,
+          coverArt,
+        });
+      }
+    );
+
+    if (process.env.NODE_ENV !== "production") {
+      console.log(
+        `Bandcamp search found ${results.length} result(s) for query: "${q}"`
+      );
+    }
+
+    return res.json({ results });
+  } catch (error) {
+    console.error("Error in /api/bandcamp-search:", error);
+    return res.status(500).json({
+      error:
+        error instanceof Error ? error.message : "Failed to search Bandcamp",
     });
   }
 });
