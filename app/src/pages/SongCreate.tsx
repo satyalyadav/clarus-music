@@ -965,71 +965,188 @@ const SongCreate = (): React.ReactElement => {
     setLoading(true);
 
     try {
-      // For Bandcamp albums, use artist name as-is (Bandcamp is source of truth)
-      // Albums are always from Bandcamp when using this handler, so don't split
-      const allNames = albumResult.artist ? [albumResult.artist] : [];
+      // Check if album artist is "Various Artists" or similar compilation indicator
+      const isVariousArtists =
+        albumResult.artist &&
+        /various\s+artists?/i.test(albumResult.artist.trim());
 
-      let primaryArtistId: number | null = null;
-      const allArtistIds: number[] = [];
+      // For "Various Artists" albums, we don't create an artist entity
+      // Each track will have its own individual artist
+      let albumArtistId: number | null = null;
 
-      for (const name of allNames) {
-        let artist = artists.find((a) => a.name === name);
-        if (!artist) {
-          const newId = await artistService.create({ name });
-          artist = { artist_id: newId, name };
-          setArtists((prev) => [...prev, artist!]);
+      if (!isVariousArtists && albumResult.artist) {
+        // Create album artist only if it's not "Various Artists"
+        let albumArtist = artists.find((a) => a.name === albumResult.artist);
+        if (!albumArtist) {
+          const newId = await artistService.create({
+            name: albumResult.artist,
+          });
+          albumArtist = { artist_id: newId, name: albumResult.artist };
+          setArtists((prev) => [...prev, albumArtist!]);
         }
-        if (artist.artist_id != null) {
-          allArtistIds.push(artist.artist_id);
-          if (primaryArtistId == null) {
-            primaryArtistId = artist.artist_id;
+        if (albumArtist.artist_id != null) {
+          albumArtistId = albumArtist.artist_id;
+
+          // Update artist image if Bandcamp provided one
+          if (albumResult.artistImage) {
+            try {
+              await artistService.update(albumArtist.artist_id, {
+                image_url: albumResult.artistImage,
+              });
+              setArtists((prev) =>
+                prev.map((a) =>
+                  a.artist_id === albumArtist.artist_id
+                    ? { ...a, image_url: albumResult.artistImage }
+                    : a
+                )
+              );
+            } catch (err) {
+              console.error("Error updating artist image:", err);
+            }
           }
         }
-      }
-
-      if (primaryArtistId == null) {
-        throw new Error("Could not create or find artist");
-      }
-
-      // Update artist image if Bandcamp provided one
-      if (albumResult.artistImage) {
-        try {
-          await artistService.update(primaryArtistId, {
-            image_url: albumResult.artistImage,
-          });
-          // Update local state
-          setArtists((prev) =>
-            prev.map((a) =>
-              a.artist_id === primaryArtistId
-                ? { ...a, image_url: albumResult.artistImage }
-                : a
-            )
-          );
-        } catch (err) {
-          console.error("Error updating artist image:", err);
-          // Don't fail the whole operation if image update fails
-        }
-      }
-
-      // Find or create album
-      let album = albums.find((a) => a.title === albumResult.album);
-      if (!album && albumResult.album) {
-        const albumId = await albumService.create({
-          title: albumResult.album,
-          artist_id: primaryArtistId,
-        });
-        album = {
-          album_id: albumId,
-          title: albumResult.album,
-          artist_id: primaryArtistId,
-        };
-        setAlbums([...albums, album]);
       }
 
       // Create songs for selected tracks (only valid ones)
       const selectedTrackIndices = validSelectedTracks.sort();
       let successCount = 0;
       let errorCount = 0;
+      let firstTrackArtistId: number | null = null;
+
+      // Track created artists during this operation to avoid duplicates
+      const createdArtistsMap = new Map<string, Artist>();
+
+      // Helper function to get or create artist(s) from a name string
+      // Handles multiple artists separated by "/", "&", ",", etc.
+      const getOrCreateArtists = async (
+        artistNameString: string
+      ): Promise<Artist[]> => {
+        if (!artistNameString || !artistNameString.trim()) {
+          return [];
+        }
+
+        // Split artist name into multiple artists if needed
+        const artistNames = splitArtistNames(artistNameString)
+          .map((name) => name.trim())
+          .filter((name) => name.length > 0); // Filter out empty names
+
+        if (artistNames.length === 0) {
+          return [];
+        }
+
+        const resultArtists: Artist[] = [];
+
+        for (const artistName of artistNames) {
+          // Skip empty names
+          if (!artistName || artistName.trim().length === 0) {
+            continue;
+          }
+
+          // Check if we already created it in this operation
+          if (createdArtistsMap.has(artistName)) {
+            resultArtists.push(createdArtistsMap.get(artistName)!);
+            continue;
+          }
+
+          // Check if it exists in the database
+          let artist = artists.find((a) => a.name === artistName);
+          if (!artist) {
+            const newId = await artistService.create({ name: artistName });
+            artist = { artist_id: newId, name: artistName };
+            setArtists((prev) => [...prev, artist!]);
+
+            // Try to fetch Bandcamp image for this artist
+            try {
+              const response = await fetch(
+                `/api/bandcamp-artist-image?artist=${encodeURIComponent(
+                  artistName
+                )}`
+              );
+              if (response.ok) {
+                const data = await response.json();
+                if (data.imageUrl) {
+                  await artistService.update(newId, {
+                    image_url: data.imageUrl,
+                  });
+                  artist = { ...artist, image_url: data.imageUrl };
+                  setArtists((prev) =>
+                    prev.map((a) =>
+                      a.artist_id === newId
+                        ? { ...a, image_url: data.imageUrl }
+                        : a
+                    )
+                  );
+                }
+              }
+            } catch (err) {
+              console.error(
+                `Error fetching Bandcamp image for ${artistName}:`,
+                err
+              );
+              // Continue without image - Spotify fallback will handle it later
+            }
+          }
+
+          if (artist) {
+            createdArtistsMap.set(artistName, artist);
+            resultArtists.push(artist);
+          }
+        }
+
+        return resultArtists;
+      };
+
+      // First pass: determine first track's artist for album creation
+      if (!albumArtistId && selectedTrackIndices.length > 0) {
+        const firstTrack = albumResult.tracks[selectedTrackIndices[0]];
+        if (firstTrack) {
+          let trackTitle = firstTrack.title || "";
+          let trackArtistName: string | null = null;
+
+          if ((firstTrack as any).artist) {
+            trackArtistName = (firstTrack as any).artist;
+          } else {
+            // Parse "Artist - Track Name" format
+            // Use lastIndexOf to find the separator (handles artist names with hyphens like "NA-3LDK")
+            const lastSeparatorIndex = trackTitle.lastIndexOf(" - ");
+            if (lastSeparatorIndex > 0) {
+              trackArtistName = trackTitle
+                .substring(0, lastSeparatorIndex)
+                .trim();
+            } else {
+              // Fallback: try pattern with spaces
+              const titleMatch = trackTitle.match(/^(.+?)\s+-\s+(.+)$/);
+              if (titleMatch) {
+                trackArtistName = titleMatch[1].trim();
+              }
+            }
+          }
+
+          if (trackArtistName) {
+            const trackArtists = await getOrCreateArtists(trackArtistName);
+            if (trackArtists.length > 0) {
+              firstTrackArtistId = trackArtists[0].artist_id!;
+            }
+          }
+        }
+      }
+
+      // Find or create album (use albumArtistId, or first track's artist for "Various Artists")
+      let album = albums.find((a) => a.title === albumResult.album);
+      if (!album && albumResult.album) {
+        // For "Various Artists" albums, use first track's artist as placeholder
+        // (database requires artist_id, but display will show "Various Artists")
+        const albumId = await albumService.create({
+          title: albumResult.album,
+          artist_id: albumArtistId || firstTrackArtistId || 1,
+        });
+        album = {
+          album_id: albumId,
+          title: albumResult.album,
+          artist_id: albumArtistId || firstTrackArtistId || 1,
+        };
+        setAlbums([...albums, album]);
+      }
 
       for (const trackIndex of selectedTrackIndices) {
         const track = albumResult.tracks[trackIndex];
@@ -1048,13 +1165,68 @@ const SongCreate = (): React.ReactElement => {
               `Skipping track "${track.title}" - no valid audio URL`
             );
             errorCount++;
-            // Don't continue silently - show which tracks failed
             continue;
           }
 
+          // Parse track title to extract artist and title
+          // Backend may have already parsed it, but handle both cases
+          let trackTitle = track.title || "";
+          let trackArtistName: string | null = null;
+
+          // Check if backend already extracted the artist
+          if ((track as any).artist) {
+            trackArtistName = (track as any).artist;
+          } else {
+            // Parse "Artist - Track Name" format
+            // Use lastIndexOf to find the separator (handles artist names with hyphens like "NA-3LDK")
+            const lastSeparatorIndex = trackTitle.lastIndexOf(" - ");
+            if (lastSeparatorIndex > 0) {
+              trackArtistName = trackTitle
+                .substring(0, lastSeparatorIndex)
+                .trim();
+              trackTitle = trackTitle.substring(lastSeparatorIndex + 3).trim();
+            } else {
+              // Fallback: try pattern with spaces
+              const titleMatch = trackTitle.match(/^(.+?)\s+-\s+(.+)$/);
+              if (titleMatch) {
+                trackArtistName = titleMatch[1].trim();
+                trackTitle = titleMatch[2].trim();
+              }
+            }
+          }
+
+          // Get or create track artist(s) - handles multiple artists like "NA-3LDK / DEFRIC"
+          let trackArtists: Artist[] = [];
+          if (trackArtistName) {
+            trackArtists = await getOrCreateArtists(trackArtistName);
+          }
+
+          // Fallback: use album artist if no track artist found
+          if (trackArtists.length === 0) {
+            if (!albumArtistId) {
+              throw new Error(
+                `Could not determine artist for track "${track.title}"`
+              );
+            }
+            const albumArtist = artists.find(
+              (a) => a.artist_id === albumArtistId
+            );
+            if (albumArtist) {
+              trackArtists = [albumArtist];
+            }
+          }
+
+          // Use first artist as primary artist_id (required by database)
+          const primaryTrackArtistId = trackArtists[0]?.artist_id;
+          if (!primaryTrackArtistId) {
+            throw new Error(
+              `Could not determine artist for track "${track.title}"`
+            );
+          }
+
           const newSongId = await songService.create({
-            title: track.title || "",
-            artist_id: primaryArtistId,
+            title: trackTitle,
+            artist_id: primaryTrackArtistId,
             album_id: album?.album_id || null,
             duration: track.duration || "00:00:00",
             url: track.audioUrl,
@@ -1062,10 +1234,11 @@ const SongCreate = (): React.ReactElement => {
             cover_image: albumResult.coverArt || null,
           });
 
-          // Associate only the primary artist with this song (Bandcamp doesn't list featured artists)
-          await songArtistService.setArtistsForSong(newSongId, [
-            primaryArtistId,
-          ]);
+          // Associate all track artists with this song (handles multiple artists)
+          const trackArtistIds = trackArtists
+            .map((a) => a.artist_id)
+            .filter((id): id is number => id !== null && id !== undefined);
+          await songArtistService.setArtistsForSong(newSongId, trackArtistIds);
           successCount++;
         } catch (err: any) {
           console.error(`Failed to create song "${track.title}":`, err);

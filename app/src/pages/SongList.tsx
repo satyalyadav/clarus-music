@@ -1,22 +1,17 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
-import { getSongsWithRelations, getSongUrl, revokeSongUrl, songService } from "../services/db";
+import {
+  getSongsWithRelations,
+  getSongUrl,
+  revokeSongUrl,
+  songService,
+  SongWithRelations,
+} from "../services/db";
 import { formatDuration } from "../utils/formatDuration";
 
-interface Song {
-  song_id?: number;
-  title: string;
-  duration: string;
-  cover_image?: string | null;
-  artist_name?: string;
-  album_title?: string;
-  file_blob?: Blob;
-  file_handle?: FileSystemFileHandle;
-}
-
 const SongList: React.FC = () => {
-  const [songs, setSongs] = useState<Song[]>([]);
+  const [songs, setSongs] = useState<SongWithRelations[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [songUrls, setSongUrls] = useState<Map<number, string>>(new Map());
@@ -24,7 +19,7 @@ const SongList: React.FC = () => {
   const [selectionMode, setSelectionMode] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
-  const { playTrack, currentTrack, isPlaying, setQueue, togglePlayPause, stop } =
+  const { playTrack, currentTrack, setQueue, togglePlayPause, stop } =
     useAudioPlayer();
 
   useEffect(() => {
@@ -32,7 +27,7 @@ const SongList: React.FC = () => {
       try {
         const songsData = await getSongsWithRelations();
         setSongs(songsData);
-        
+
         // Create object URLs for all songs
         const urlMap = new Map<number, string>();
         for (const song of songsData) {
@@ -41,7 +36,10 @@ const SongList: React.FC = () => {
               const url = await getSongUrl(song);
               urlMap.set(song.song_id, url);
             } catch (err) {
-              console.error(`Failed to create URL for song ${song.song_id}:`, err);
+              console.error(
+                `Failed to create URL for song ${song.song_id}:`,
+                err
+              );
             }
           }
         }
@@ -57,7 +55,7 @@ const SongList: React.FC = () => {
 
     // Cleanup: revoke object URLs when component unmounts
     return () => {
-      songUrls.forEach(url => revokeSongUrl(url));
+      songUrls.forEach((url) => revokeSongUrl(url));
     };
   }, []);
 
@@ -71,7 +69,7 @@ const SongList: React.FC = () => {
             if (!url && s.song_id) {
               // Create URL if not already created
               const newUrl = await getSongUrl(s);
-              setSongUrls(prev => new Map(prev).set(s.song_id!, newUrl));
+              setSongUrls((prev) => new Map(prev).set(s.song_id!, newUrl));
               return {
                 url: newUrl,
                 title: s.title,
@@ -103,20 +101,27 @@ const SongList: React.FC = () => {
         })
       );
       // Filter out tracks with no URL
-      const validTracks = tracks.filter(t => t.url);
+      const validTracks = tracks.filter((t) => t.url);
       if (validTracks.length === 0) {
-        alert('No playable songs found');
+        alert("No playable songs found");
         return;
       }
       setQueue(validTracks);
       if (validTracks[0]) playTrack(validTracks[0], 0);
     } catch (err) {
-      console.error('Error playing all songs:', err);
-      alert(`Failed to play songs: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      console.error("Error playing all songs:", err);
+      alert(
+        `Failed to play songs: ${
+          err instanceof Error ? err.message : "Unknown error"
+        }`
+      );
     }
   };
 
-  const toggleSongSelection = (songId: number | undefined, e?: React.MouseEvent) => {
+  const toggleSongSelection = (
+    songId: number | undefined,
+    e?: React.MouseEvent
+  ) => {
     if (e) {
       e.stopPropagation();
     }
@@ -136,7 +141,9 @@ const SongList: React.FC = () => {
     if (selectedSongs.size === songs.length) {
       setSelectedSongs(new Set());
     } else {
-      const allIds = new Set(songs.map((s) => s.song_id).filter((id): id is number => !!id));
+      const allIds = new Set(
+        songs.map((s) => s.song_id).filter((id): id is number => !!id)
+      );
       setSelectedSongs(allIds);
     }
   };
@@ -151,10 +158,12 @@ const SongList: React.FC = () => {
 
   const handleBulkDelete = async () => {
     if (selectedSongs.size === 0) return;
-    
+
     const count = selectedSongs.size;
-    const confirmMessage = `Are you sure you want to delete ${count} song${count !== 1 ? "s" : ""}? This action cannot be undone.`;
-    
+    const confirmMessage = `Are you sure you want to delete ${count} song${
+      count !== 1 ? "s" : ""
+    }? This action cannot be undone.`;
+
     if (!window.confirm(confirmMessage)) return;
 
     setDeleting(true);
@@ -163,8 +172,9 @@ const SongList: React.FC = () => {
     try {
       // Check if any of the songs being deleted is currently playing
       const deletedSongIds = Array.from(selectedSongs);
-      const isCurrentSongDeleted = currentTrack?.songId && deletedSongIds.includes(currentTrack.songId);
-      
+      const isCurrentSongDeleted =
+        currentTrack?.songId && deletedSongIds.includes(currentTrack.songId);
+
       // Delete all selected songs
       const deletePromises = Array.from(selectedSongs).map((songId) =>
         songService.delete(songId).catch((err) => {
@@ -174,10 +184,14 @@ const SongList: React.FC = () => {
       );
 
       const results = await Promise.all(deletePromises);
-      const errors = results.filter((r) => r && typeof r === "object" && "error" in r);
+      const errors = results.filter(
+        (r) => r && typeof r === "object" && "error" in r
+      );
 
       if (errors.length > 0) {
-        setError(`Failed to delete ${errors.length} song(s). Please try again.`);
+        setError(
+          `Failed to delete ${errors.length} song(s). Please try again.`
+        );
       }
 
       // Stop playback if the currently playing song was deleted
@@ -199,7 +213,10 @@ const SongList: React.FC = () => {
             const url = await getSongUrl(song);
             urlMap.set(song.song_id, url);
           } catch (err) {
-            console.error(`Failed to create URL for song ${song.song_id}:`, err);
+            console.error(
+              `Failed to create URL for song ${song.song_id}:`,
+              err
+            );
           }
         }
       }
@@ -211,7 +228,7 @@ const SongList: React.FC = () => {
     }
   };
 
-  const handlePlaySong = async (song: Song) => {
+  const handlePlaySong = async (song: SongWithRelations) => {
     try {
       const tracks = await Promise.all(
         songs.map(async (s) => {
@@ -219,7 +236,7 @@ const SongList: React.FC = () => {
             const url = s.song_id ? songUrls.get(s.song_id) : null;
             if (!url && s.song_id) {
               const newUrl = await getSongUrl(s);
-              setSongUrls(prev => new Map(prev).set(s.song_id!, newUrl));
+              setSongUrls((prev) => new Map(prev).set(s.song_id!, newUrl));
               return {
                 url: newUrl,
                 title: s.title,
@@ -250,35 +267,40 @@ const SongList: React.FC = () => {
           }
         })
       );
-      const validTracks = tracks.filter(t => t.url);
+      const validTracks = tracks.filter((t) => t.url);
       setQueue(validTracks);
-      
+
       // Find the index of the song being played
-      const songIndex = validTracks.findIndex(t => t.songId === song.song_id);
-      
+      const songIndex = validTracks.findIndex((t) => t.songId === song.song_id);
+
       if (songIndex !== -1) {
         playTrack(validTracks[songIndex], songIndex);
       } else {
         // Fallback: try to get URL and play directly
         const songUrl = song.song_id ? songUrls.get(song.song_id) : null;
         let finalUrl = songUrl;
-        
+
         if (!songUrl && song.song_id) {
           try {
-            finalUrl = await getSongUrl(song);
-            setSongUrls(prev => new Map(prev).set(song.song_id!, finalUrl));
+            const newUrl = await getSongUrl(song);
+            finalUrl = newUrl;
+            setSongUrls((prev) => new Map(prev).set(song.song_id!, newUrl));
           } catch (err) {
             console.error(`Failed to get URL for song ${song.song_id}:`, err);
-            alert(`Cannot play song: ${err instanceof Error ? err.message : 'Song file not available'}`);
+            alert(
+              `Cannot play song: ${
+                err instanceof Error ? err.message : "Song file not available"
+              }`
+            );
             return;
           }
         }
-        
+
         if (!finalUrl) {
-          alert('Cannot play song: Song file not available');
+          alert("Cannot play song: Song file not available");
           return;
         }
-        
+
         playTrack({
           url: finalUrl,
           title: song.title,
@@ -289,8 +311,12 @@ const SongList: React.FC = () => {
         });
       }
     } catch (err) {
-      console.error('Error playing song:', err);
-      alert(`Failed to play song: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      console.error("Error playing song:", err);
+      alert(
+        `Failed to play song: ${
+          err instanceof Error ? err.message : "Unknown error"
+        }`
+      );
     }
   };
 
@@ -301,7 +327,15 @@ const SongList: React.FC = () => {
     <div>
       <h1 className="section-title">songs</h1>
 
-      <div style={{ display: "flex", gap: "12px", marginBottom: "24px", flexWrap: "wrap", alignItems: "center" }}>
+      <div
+        style={{
+          display: "flex",
+          gap: "12px",
+          marginBottom: "24px",
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}
+      >
         <button
           className="btn btn-primary"
           onClick={handlePlayAll}
@@ -309,8 +343,8 @@ const SongList: React.FC = () => {
         >
           ▶ play all
         </button>
-        <button 
-          className="btn" 
+        <button
+          className="btn"
           onClick={() => navigate("/songs/new")}
           disabled={selectionMode}
         >
@@ -326,23 +360,26 @@ const SongList: React.FC = () => {
             </button>
             {selectionMode && (
               <>
-                <button
-                  className="btn"
-                  onClick={toggleSelectAll}
-                >
-                  {selectedSongs.size === songs.length ? "deselect all" : "select all"}
+                <button className="btn" onClick={toggleSelectAll}>
+                  {selectedSongs.size === songs.length
+                    ? "deselect all"
+                    : "select all"}
                 </button>
                 {selectedSongs.size > 0 && (
                   <button
                     className="btn"
                     onClick={handleBulkDelete}
                     disabled={deleting}
-                    style={{ 
+                    style={{
                       backgroundColor: "var(--error-color, #dc3545)",
-                      color: "white"
+                      color: "white",
                     }}
                   >
-                    {deleting ? "deleting..." : `delete ${selectedSongs.size} song${selectedSongs.size !== 1 ? "s" : ""}`}
+                    {deleting
+                      ? "deleting..."
+                      : `delete ${selectedSongs.size} song${
+                          selectedSongs.size !== 1 ? "s" : ""
+                        }`}
                   </button>
                 )}
               </>
@@ -367,15 +404,19 @@ const SongList: React.FC = () => {
         <div className="list">
           {songs.map((song) => {
             // Use songId for reliable matching, fallback to URL matching
-            const isCurrent = (song.song_id && currentTrack?.songId === song.song_id) ||
-                             (song.song_id && songUrls.get(song.song_id) && currentTrack?.url === songUrls.get(song.song_id));
-            const isCurrentPlaying = isCurrent && isPlaying;
+            const isCurrent =
+              (song.song_id && currentTrack?.songId === song.song_id) ||
+              (song.song_id &&
+                songUrls.get(song.song_id) &&
+                currentTrack?.url === songUrls.get(song.song_id));
 
-            const isSelected = song.song_id ? selectedSongs.has(song.song_id) : false;
+            const isSelected = song.song_id
+              ? selectedSongs.has(song.song_id)
+              : false;
 
             return (
-              <div 
-                key={song.song_id} 
+              <div
+                key={song.song_id}
                 className="list-item"
                 onClick={() => {
                   if (selectionMode) {
@@ -385,7 +426,9 @@ const SongList: React.FC = () => {
                   }
                 }}
                 style={{
-                  backgroundColor: isSelected ? "var(--button-hover, rgba(0,0,0,0.05))" : undefined,
+                  backgroundColor: isSelected
+                    ? "var(--button-hover, rgba(0,0,0,0.05))"
+                    : undefined,
                   cursor: selectionMode ? "pointer" : undefined,
                 }}
               >
@@ -428,7 +471,10 @@ const SongList: React.FC = () => {
                   </div>
                 </div>
                 {!selectionMode && (
-                  <div className="list-item-actions" onClick={(e) => e.stopPropagation()}>
+                  <div
+                    className="list-item-actions"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <button
                       className="btn btn-small"
                       onClick={() => navigate(`/songs/${song.song_id}/edit`)}

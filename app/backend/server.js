@@ -75,6 +75,160 @@ async function getSpotifyAccessToken() {
   return data.access_token;
 }
 
+// Helper function to fetch artist image from Bandcamp artist profile
+async function fetchArtistImageFromBandcamp(artistName) {
+  try {
+    // Search for the artist on Bandcamp
+    const searchUrl = `https://bandcamp.com/search?q=${encodeURIComponent(
+      artistName
+    )}`;
+
+    const response = await fetch(searchUrl, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+      },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const html = await response.text();
+    const $ = cheerio.load(html);
+
+    // Look for artist results (not albums/tracks)
+    let artistProfileUrl = null;
+
+    $(".result-items .searchresult, .result-items .result, .searchresult").each(
+      (i, el) => {
+        const $el = $(el);
+        const typeText =
+          $el.find(".itemtype, .type, .result-info .item-type").text() || "";
+
+        // Check if this is an artist result
+        if (/artist|band/i.test(typeText)) {
+          const resultTitle = $el
+            .find(".heading, .result-info .heading")
+            .text()
+            .trim();
+
+          // Normalize names for comparison
+          const normalizeName = (name) =>
+            name.toLowerCase().trim().replace(/\s+/g, " ");
+
+          if (normalizeName(resultTitle) === normalizeName(artistName)) {
+            let url =
+              $el.find("a.item-link, a.searchresult, a").attr("href") || "";
+            if (url && url.startsWith("/")) {
+              url = `https://bandcamp.com${url}`;
+            }
+            if (url) {
+              artistProfileUrl = url;
+              return false; // Break the loop
+            }
+          }
+        }
+      }
+    );
+
+    if (!artistProfileUrl) {
+      if (process.env.NODE_ENV !== "production") {
+        console.log(
+          `Could not find Bandcamp profile for artist: ${artistName}`
+        );
+      }
+      return null;
+    }
+
+    // Fetch the artist profile page
+    const profileResponse = await fetch(artistProfileUrl, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+      },
+    });
+
+    if (!profileResponse.ok) {
+      return null;
+    }
+
+    const profileHtml = await profileResponse.text();
+    const $profile = cheerio.load(profileHtml);
+
+    // Extract artist image using the same selectors as track/album pages
+    const artistImageSelectors = [
+      ".band-photo img",
+      ".band-photo",
+      ".band-photo-container img",
+      ".band-photo-container",
+      ".band-photo-wrapper img",
+      "a.band-photo img",
+      ".band-photo a img",
+      ".band-photo-link img",
+    ];
+
+    for (const selector of artistImageSelectors) {
+      const img = $profile(selector).first();
+      if (img.length) {
+        const src =
+          img.attr("src") || img.attr("data-src") || img.attr("data-original");
+        if (src) {
+          try {
+            let artistImage = src.startsWith("http")
+              ? src
+              : new URL(src, artistProfileUrl).href;
+
+            // Remove size parameters for higher quality
+            artistImage = artistImage.replace(/_\d+\.(jpg|png)$/, "_0.$1");
+
+            if (process.env.NODE_ENV !== "production") {
+              console.log(
+                `Found artist image for ${artistName}: ${artistImage}`
+              );
+            }
+            return artistImage;
+          } catch (e) {
+            // Invalid URL, continue
+          }
+        }
+      }
+    }
+
+    return null;
+  } catch (error) {
+    if (process.env.NODE_ENV !== "production") {
+      console.error(`Error fetching artist image for ${artistName}:`, error);
+    }
+    return null;
+  }
+}
+
+// Endpoint to fetch artist image from Bandcamp
+app.get("/api/bandcamp-artist-image", async (req, res) => {
+  try {
+    const { artist } = req.query;
+
+    if (!artist || typeof artist !== "string") {
+      return res.status(400).json({ error: "Artist parameter is required" });
+    }
+
+    const artistImage = await fetchArtistImageFromBandcamp(artist.trim());
+
+    if (artistImage) {
+      return res.json({ imageUrl: artistImage });
+    } else {
+      return res.json({ imageUrl: null });
+    }
+  } catch (error) {
+    console.error("Error in /api/bandcamp-artist-image:", error);
+    return res.status(500).json({
+      error:
+        error instanceof Error ? error.message : "Failed to fetch artist image",
+    });
+  }
+});
+
 // Bandcamp metadata extraction endpoint
 app.get("/api/bandcamp-metadata", async (req, res) => {
   try {
@@ -214,8 +368,34 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
                   ).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
                 }
 
+                // Parse track title to extract artist and title if in "Artist - Track Name" format
+                let trackTitle = track.title || "";
+                let trackArtist = null;
+
+                // Check for "Artist - Track Name" format (common on compilation albums)
+                // Note: Artist part may contain multiple artists like "NA-3LDK / DEFRIC"
+                // Use a pattern that matches hyphen with spaces (the separator) rather than hyphens in artist names
+                // Match from the end: look for the last " - " pattern (with spaces)
+                const lastSeparatorIndex = trackTitle.lastIndexOf(" - ");
+                if (lastSeparatorIndex > 0) {
+                  trackArtist = trackTitle
+                    .substring(0, lastSeparatorIndex)
+                    .trim();
+                  trackTitle = trackTitle
+                    .substring(lastSeparatorIndex + 3)
+                    .trim();
+                } else {
+                  // Fallback: try pattern without spaces (but prefer the spaced version)
+                  const titleMatch = trackTitle.match(/^(.+?)\s+-\s+(.+)$/);
+                  if (titleMatch) {
+                    trackArtist = titleMatch[1].trim();
+                    trackTitle = titleMatch[2].trim();
+                  }
+                }
+
                 return {
-                  title: track.title || "",
+                  title: trackTitle,
+                  artist: trackArtist, // Individual track artist(s) if extracted (may contain "/" or "&" for multiple)
                   duration: duration,
                   audioUrl: audioUrl,
                   trackNumber: index + 1,
@@ -328,6 +508,19 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
       metadata.title = ogTitle;
     }
 
+    // For track pages, parse title FIRST to extract track artist from "Artist - Track Name" format
+    // This must happen before artist extraction so we can identify compilation tracks
+    const trackMatch = url.match(/track\/([^/?#]+)/);
+    let trackArtistFromTitle = null;
+    if (trackMatch && metadata.title) {
+      // Check for "Artist - Track Name" format (common on compilation tracks)
+      const titleMatch = metadata.title.match(/^(.+?)\s*-\s*(.+)$/);
+      if (titleMatch) {
+        trackArtistFromTitle = titleMatch[1].trim();
+        metadata.title = titleMatch[2].trim();
+      }
+    }
+
     if (!metadata.artist) {
       metadata.artist =
         $('meta[property="og:site_name"]').attr("content") ||
@@ -341,6 +534,87 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
       metadata.artist = metadata.artist
         .replace(/^from\s+.+?\s+by\s+/i, "")
         .trim();
+    }
+
+    // Store album artist separately (this is the label/compilation artist)
+    // For track pages, the album artist is the band-name (label), NOT tralbumData.artist
+    // (tralbumData.artist might be the track artist for compilation tracks)
+    const albumArtist =
+      $(".band-name").text().trim() ||
+      $('meta[property="og:site_name"]').attr("content") ||
+      "";
+
+    // For track pages, check if track artist differs from album artist
+    // The track artist comes from tralbumData.artist or metadata.artist
+    // The album artist is the band-name (label/compilation artist)
+    if (isTrack && metadata.artist && !metadata.artistImage) {
+      const normalizeName = (name) =>
+        name.toLowerCase().trim().replace(/\s+/g, " ");
+      const trackArtistNormalized = normalizeName(metadata.artist);
+      const albumArtistNormalized = normalizeName(albumArtist);
+
+      // If track artist differs from album artist, search for track artist's image
+      if (
+        trackArtistNormalized &&
+        albumArtistNormalized &&
+        trackArtistNormalized !== albumArtistNormalized
+      ) {
+        if (process.env.NODE_ENV !== "production") {
+          console.log(
+            `Track artist "${metadata.artist}" differs from album artist "${albumArtist}" - searching for track artist image`
+          );
+        }
+
+        const trackArtistImage = await fetchArtistImageFromBandcamp(
+          metadata.artist
+        );
+        if (trackArtistImage) {
+          metadata.artistImage = trackArtistImage;
+          if (process.env.NODE_ENV !== "production") {
+            console.log(`Found track artist image: ${trackArtistImage}`);
+          }
+        } else {
+          if (process.env.NODE_ENV !== "production") {
+            console.log(
+              `Could not find track artist image for "${metadata.artist}"`
+            );
+          }
+        }
+      } else if (process.env.NODE_ENV !== "production") {
+        console.log(
+          `Track artist "${metadata.artist}" matches album artist "${albumArtist}" - using album artist image`
+        );
+      }
+    }
+
+    // Also check if we extracted track artist from title format
+    if (isTrack && trackArtistFromTitle && !metadata.artistImage) {
+      const normalizeName = (name) =>
+        name.toLowerCase().trim().replace(/\s+/g, " ");
+      const trackArtistNormalized = normalizeName(trackArtistFromTitle);
+      const albumArtistNormalized = normalizeName(albumArtist);
+
+      // If track artist differs from album artist, use track artist and search for their image
+      if (
+        trackArtistNormalized &&
+        albumArtistNormalized &&
+        trackArtistNormalized !== albumArtistNormalized
+      ) {
+        metadata.artist = trackArtistFromTitle; // Use track artist instead of album artist
+
+        if (process.env.NODE_ENV !== "production") {
+          console.log(
+            `Track artist from title "${trackArtistFromTitle}" differs from album artist "${albumArtist}" - searching for track artist image`
+          );
+        }
+
+        const trackArtistImage = await fetchArtistImageFromBandcamp(
+          trackArtistFromTitle
+        );
+        if (trackArtistImage) {
+          metadata.artistImage = trackArtistImage;
+        }
+      }
     }
 
     if (!metadata.coverArt) {
@@ -449,9 +723,8 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
       }
     }
 
-    // Parse track title if it's a track page
-    const trackMatch = url.match(/track\/([^/?#]+)/);
-    if (trackMatch && metadata.title) {
+    // Additional cleanup for track title (if not already processed above)
+    if (trackMatch && metadata.title && !trackArtistFromTitle) {
       // Remove artist prefix if present (format: "Track Name • Artist Name")
       metadata.title = metadata.title.replace(/^\s*[^•]+•\s*/, "").trim();
     }
