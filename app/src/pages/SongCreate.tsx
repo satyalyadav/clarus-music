@@ -626,15 +626,21 @@ const SongCreate = (): React.ReactElement => {
       let bandcampAlbum = result.album;
       let bandcampArtistImage = result.artistImage;
       let bandcampCoverArt = result.coverArt;
+      let bandcampAlbumArtist: string | null = null; // Album artist (may be "Various Artists" for compilations)
 
       if (isBandcampResult && bandcampMetadata) {
         // Use artist from metadata if available, and clean it
+        // Note: For track pages, this is the track artist, not the album artist
         if (bandcampMetadata.artist) {
           bandcampArtist = bandcampMetadata.artist;
           // Clean up artist name: remove patterns like "from [album] by [artist]" -> "[artist]"
           bandcampArtist = bandcampArtist
             .replace(/^from\s+.+?\s+by\s+/i, "")
             .trim();
+        }
+        // Use album artist from metadata if available (for compilation albums)
+        if ((bandcampMetadata as any).albumArtist) {
+          bandcampAlbumArtist = (bandcampMetadata as any).albumArtist;
         }
         // Use album from metadata if available
         if (bandcampMetadata.album) {
@@ -788,40 +794,134 @@ const SongCreate = (): React.ReactElement => {
       }
       setSelectedArtistIds(allArtistIds);
 
-      // Find or create album (requires primary artist_id)
+      // Find or create album
+      // For compilation albums, use the album artist ("Various Artists") instead of track artist
       if (bandcampAlbum && primaryArtistId != null) {
         let album = albums.find((a) => a.title === bandcampAlbum);
+
+        // Determine which artist to use for the album
+        let albumArtistId = primaryArtistId;
+
+        // Check if this is a "Various Artists" compilation
+        const isVariousArtists =
+          bandcampAlbumArtist &&
+          /various\s+artists?/i.test(bandcampAlbumArtist.trim());
+
+        if (isVariousArtists) {
+          // For "Various Artists" albums, don't create an artist entity
+          // Use the track artist's ID as a placeholder (database requires artist_id)
+          // The UI will display "Various Artists" based on album logic
+          // albumArtistId already set to primaryArtistId, which is correct
+        } else if (bandcampAlbumArtist && bandcampAlbumArtist.trim()) {
+          // Check if the album artist looks like a label name (contains common label indicators)
+          // If track artist differs significantly from album artist, it might be a compilation
+          const albumArtistName = bandcampAlbumArtist.trim();
+          const trackArtistName = effectiveNames[0] || "";
+
+          // If album artist is very different from track artist, and doesn't match "Various Artists",
+          // it's likely a label - don't create an artist entity for labels
+          // Instead, check if we should treat it as "Various Artists"
+          const isLikelyLabel =
+            albumArtistName !== trackArtistName &&
+            !/various\s+artists?/i.test(albumArtistName) &&
+            (albumArtistName.includes("-") ||
+              albumArtistName.includes("Music") ||
+              albumArtistName.includes("Records") ||
+              albumArtistName.includes("Label"));
+
+          if (isLikelyLabel) {
+            // This looks like a label, not an artist - treat as "Various Artists" compilation
+            // Don't create an artist entity for "Various Artists"
+            // Use the track artist's ID as a placeholder (database requires artist_id)
+            // The UI will display "Various Artists" based on album logic
+            // albumArtistId already set to primaryArtistId, which is correct
+          } else {
+            // Use the album artist from Bandcamp if available
+            let albumArtist = artists.find((a) => a.name === albumArtistName);
+            if (!albumArtist) {
+              const newId = await artistService.create({
+                name: albumArtistName,
+              });
+              albumArtist = { artist_id: newId, name: albumArtistName };
+              setArtists((prev) => [...prev, albumArtist!]);
+            }
+            if (albumArtist.artist_id != null) {
+              albumArtistId = albumArtist.artist_id;
+            }
+          }
+        }
+        // Otherwise, use primaryArtistId (track artist) as fallback
+
         if (!album) {
           const albumId = await albumService.create({
             title: bandcampAlbum,
-            artist_id: primaryArtistId,
+            artist_id: albumArtistId,
             cover_image: bandcampCoverArt || null, // Include cover image from metadata
           });
           album = {
             album_id: albumId,
             title: bandcampAlbum,
-            artist_id: primaryArtistId,
+            artist_id: albumArtistId,
             cover_image: bandcampCoverArt || null,
           };
           setAlbums([...albums, album]);
         } else {
-          // Update album cover image if it's missing but we have one from the metadata
-          if (!album.cover_image && bandcampCoverArt) {
-            try {
-              const currentAlbumId = album.album_id!;
-              await albumService.update(currentAlbumId, {
-                cover_image: bandcampCoverArt,
-              });
-              // Update local state
-              setAlbums((prev) =>
-                prev.map((a) =>
-                  a.album_id === currentAlbumId
-                    ? { ...a, cover_image: bandcampCoverArt }
-                    : a
-                )
-              );
-            } catch (err) {
-              console.error("Error updating album cover image:", err);
+          // Album already exists - check if we need to update artist_id for "Various Artists"
+          // TypeScript guard: album is defined here since we're in the else branch
+          const existingAlbum = album;
+          if (existingAlbum) {
+            const currentAlbumArtist = existingAlbum.artist_id
+              ? artists.find((a) => a.artist_id === existingAlbum.artist_id)
+                  ?.name
+              : null;
+            const isCurrentVariousArtists =
+              currentAlbumArtist &&
+              /various\s+artists?/i.test(currentAlbumArtist.trim());
+
+            // If album should be "Various Artists" but currently isn't, update it
+            if (
+              isVariousArtists &&
+              !isCurrentVariousArtists &&
+              existingAlbum.album_id
+            ) {
+              try {
+                await albumService.update(existingAlbum.album_id, {
+                  artist_id: albumArtistId,
+                });
+                album = { ...existingAlbum, artist_id: albumArtistId };
+                setAlbums((prev) =>
+                  prev.map((a) =>
+                    a.album_id === existingAlbum.album_id
+                      ? { ...a, artist_id: albumArtistId }
+                      : a
+                  )
+                );
+              } catch (err) {
+                console.error("Error updating album artist:", err);
+              }
+            }
+
+            // Update album cover image if it's missing but we have one from the metadata
+            if (
+              !existingAlbum.cover_image &&
+              bandcampCoverArt &&
+              existingAlbum.album_id
+            ) {
+              try {
+                await albumService.update(existingAlbum.album_id, {
+                  cover_image: bandcampCoverArt,
+                });
+                // Update local state
+                setAlbums((prev) =>
+                  prev.map((a) =>
+                    a.album_id === existingAlbum.album_id
+                      ? { ...a, cover_image: bandcampCoverArt }
+                      : a
+                  )
+                );
+              } catch (err) {
+                console.error("Error updating album cover image:", err);
+              }
             }
           }
         }

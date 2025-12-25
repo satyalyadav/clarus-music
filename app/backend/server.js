@@ -539,10 +539,91 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
     // Store album artist separately (this is the label/compilation artist)
     // For track pages, the album artist is the band-name (label), NOT tralbumData.artist
     // (tralbumData.artist might be the track artist for compilation tracks)
-    const albumArtist =
+    let albumArtist =
       $(".band-name").text().trim() ||
       $('meta[property="og:site_name"]').attr("content") ||
       "";
+
+    // For track pages, check if the page indicates "Various Artists"
+    // Look for text pattern like "from [album] by Various Artists" or "by Various Artists"
+    if (isTrack) {
+      // Multiple patterns to catch different formats
+      const variousArtistsPatterns = [
+        /\bby\s+various\s+artists?\b/i,
+        /various\s+artists?/i, // More flexible - just "various artists" anywhere
+        /from\s+.+?\s+by\s+various\s+artists?/i, // "from [album] by Various Artists"
+      ];
+
+      let foundVariousArtists = false;
+
+      // First, check the raw HTML directly (most reliable)
+      for (const pattern of variousArtistsPatterns) {
+        if (pattern.test(html)) {
+          foundVariousArtists = true;
+          if (process.env.NODE_ENV !== "production") {
+            console.log(
+              `Found 'Various Artists' pattern in page HTML: ${pattern}`
+            );
+          }
+          break;
+        }
+      }
+
+      // Also check in specific page elements
+      if (!foundVariousArtists) {
+        // Check in track title/subtitle area - look for "from [album] by Various Artists"
+        const trackTitleArea = $(
+          ".trackTitle, .trackInfo, h2, h1, h3, .track-view, .track-header, .trackTitleSection, .trackTitleView, .fromAlbum, .trackTitleView h2, .trackTitleView h3"
+        ).text();
+        for (const pattern of variousArtistsPatterns) {
+          if (pattern.test(trackTitleArea)) {
+            foundVariousArtists = true;
+            break;
+          }
+        }
+      }
+
+      // Check in the main content area
+      if (!foundVariousArtists) {
+        const mainContent = $("main, .main, .content, .track, body").text();
+        for (const pattern of variousArtistsPatterns) {
+          if (pattern.test(mainContent)) {
+            foundVariousArtists = true;
+            break;
+          }
+        }
+      }
+
+      // Check in meta tags
+      if (!foundVariousArtists) {
+        const ogDescription =
+          $('meta[property="og:description"]').attr("content") || "";
+        for (const pattern of variousArtistsPatterns) {
+          if (pattern.test(ogDescription)) {
+            foundVariousArtists = true;
+            break;
+          }
+        }
+      }
+
+      if (foundVariousArtists) {
+        albumArtist = "Various Artists";
+        if (process.env.NODE_ENV !== "production") {
+          console.log("Detected 'Various Artists' compilation album");
+        }
+      } else if (process.env.NODE_ENV !== "production") {
+        // Debug: log what we found instead
+        console.log(
+          `Album artist detected as: "${albumArtist}" (not Various Artists)`
+        );
+        // Also log a sample of the page text to help debug
+        const sampleText = $("h2, h3, .trackTitleView")
+          .first()
+          .text()
+          .substring(0, 200);
+        console.log(`Sample page text: "${sampleText}"`);
+      }
+    }
 
     // For track pages, check if track artist differs from album artist
     // The track artist comes from tralbumData.artist or metadata.artist
@@ -853,9 +934,11 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
     }
 
     // For single tracks, return the existing structure
+    // Include album artist separately (for compilation albums, this is "Various Artists")
     const trackResponse = {
       type: "track",
       ...metadata,
+      albumArtist: albumArtist || metadata.artist, // Album artist (may be "Various Artists" for compilations)
       pageUrl: url,
     };
 
@@ -865,6 +948,7 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
         title: metadata.title,
         artist: metadata.artist,
         album: metadata.album,
+        albumArtist: albumArtist,
         audioUrl: metadata.audioUrl || "(none found)",
         duration: metadata.duration || "(none found)",
         pageUrl: url,
