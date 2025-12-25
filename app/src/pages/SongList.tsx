@@ -24,7 +24,7 @@ const SongList: React.FC = () => {
   const [selectionMode, setSelectionMode] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
-  const { playTrack, currentTrack, isPlaying, setQueue, togglePlayPause } =
+  const { playTrack, currentTrack, isPlaying, setQueue, togglePlayPause, stop } =
     useAudioPlayer();
 
   useEffect(() => {
@@ -161,6 +161,10 @@ const SongList: React.FC = () => {
     setError(null);
 
     try {
+      // Check if any of the songs being deleted is currently playing
+      const deletedSongIds = Array.from(selectedSongs);
+      const isCurrentSongDeleted = currentTrack?.songId && deletedSongIds.includes(currentTrack.songId);
+      
       // Delete all selected songs
       const deletePromises = Array.from(selectedSongs).map((songId) =>
         songService.delete(songId).catch((err) => {
@@ -174,6 +178,11 @@ const SongList: React.FC = () => {
 
       if (errors.length > 0) {
         setError(`Failed to delete ${errors.length} song(s). Please try again.`);
+      }
+
+      // Stop playback if the currently playing song was deleted
+      if (isCurrentSongDeleted) {
+        stop();
       }
 
       // Clear selection, exit selection mode, and reload songs

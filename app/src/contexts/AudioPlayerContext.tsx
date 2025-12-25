@@ -21,6 +21,7 @@ export interface AudioPlayerContextProps {
   setVolume: (volume: number) => void;
   playNext: () => void;
   playPrevious: () => void;
+  stop: () => void;
   queue: Track[];
   setQueue: (tracks: Track[]) => void;
   addToQueue: (track: Track) => void;

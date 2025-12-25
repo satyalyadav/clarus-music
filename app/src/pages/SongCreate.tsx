@@ -582,11 +582,9 @@ const SongCreate: React.FC = () => {
     }
 
     try {
-      // For Bandcamp results, try to use artist name as-is first (Bandcamp is source of truth)
-      // Only split if there are clear indicators of multiple artists (like "feat." in title)
+      // For Bandcamp results, only use the primary artist (no featured artists parsing)
       const isBandcampResult =
         result.raw?.url && isBandcampUrl(result.raw.url);
-      const hasFeaturedInTitle = /\(feat\.|\(featuring/i.test(result.title || "");
       
       // Use metadata from Bandcamp if available (more accurate than search results)
       let bandcampArtist = result.artist;
@@ -617,13 +615,13 @@ const SongCreate: React.FC = () => {
       
       let effectiveNames: string[] = [];
       
-      if (isBandcampResult && !hasFeaturedInTitle) {
-        // For Bandcamp without featured artists in title, use artist name as-is
+      if (isBandcampResult) {
+        // For Bandcamp, always use only the primary artist (no featured artists)
         if (bandcampArtist) {
           effectiveNames = [bandcampArtist];
         }
       } else {
-        // For non-Bandcamp (Spotify) or when there are featured artists, parse artist names
+        // For Spotify, parse artist names (including featured artists)
         const mainArtistNames = splitArtistNames(result.artist || "");
         const featuredFromTitle = extractFeaturedFromTitle(result.title || "");
         const allNames = Array.from(
@@ -856,23 +854,27 @@ const SongCreate: React.FC = () => {
         cover_image: coverImage || null,
       });
 
-      // Associate all detected artists with this song (many-to-many)
+      // Associate artists with this song (many-to-many)
       const primaryId = parseInt(artistId);
-      // Ensure we include all artists from selectedArtistIds, plus the primary artist
-      const allIds = Array.from(
-        new Set([primaryId, ...selectedArtistIds])
-      );
+      
+      // For Bandcamp songs, only use the primary artist (no featured artists)
+      // For other sources (Spotify, file uploads), use all detected artists
+      const isBandcampSong = !!bandcampPageUrl || (songUrl && isBandcampUrl(songUrl));
+      const artistIdsToAssociate = isBandcampSong
+        ? [primaryId] // Only primary artist for Bandcamp
+        : Array.from(new Set([primaryId, ...selectedArtistIds])); // All artists for others
       
       if (import.meta.env.DEV) {
         console.log("Associating song with artists:", {
           songId: newSongId,
           primaryArtistId: primaryId,
-          allArtistIds: allIds,
+          allArtistIds: artistIdsToAssociate,
           selectedArtistIds: selectedArtistIds,
+          isBandcampSong,
         });
       }
       
-      await songArtistService.setArtistsForSong(newSongId, allIds);
+      await songArtistService.setArtistsForSong(newSongId, artistIdsToAssociate);
 
       navigate("/songs");
     } catch (err: any) {
@@ -1006,8 +1008,8 @@ const SongCreate: React.FC = () => {
             cover_image: albumResult.coverArt || null,
           });
 
-          // Associate all artists with this song
-          await songArtistService.setArtistsForSong(newSongId, allArtistIds);
+          // Associate only the primary artist with this song (Bandcamp doesn't list featured artists)
+          await songArtistService.setArtistsForSong(newSongId, [primaryArtistId]);
           successCount++;
         } catch (err: any) {
           console.error(`Failed to create song "${track.title}":`, err);
@@ -1484,6 +1486,22 @@ const SongCreate: React.FC = () => {
                           }}
                         >
                           {result.artist || "Unknown Artist"}
+                          {result.raw?.type && isBandcampUrl(result.raw?.url || "") && (
+                            <span
+                              style={{
+                                textTransform: "capitalize",
+                                marginLeft: "6px",
+                                padding: "2px 6px",
+                                backgroundColor: "var(--card-bg, rgba(255, 255, 255, 0.1))",
+                                border: "1px solid var(--border-color, rgba(255, 255, 255, 0.2))",
+                                borderRadius: "3px",
+                                fontSize: "0.85em",
+                                color: "var(--text-primary)",
+                              }}
+                            >
+                              {result.raw.type}
+                            </span>
+                          )}
                           {result.album && ` • ${result.album}`}
                         </div>
                       </div>
@@ -1665,6 +1683,22 @@ const SongCreate: React.FC = () => {
                           }}
                         >
                           {result.artist}
+                          {result.raw?.type && isBandcampUrl(result.raw?.url || "") && (
+                            <span
+                              style={{
+                                textTransform: "capitalize",
+                                marginLeft: "6px",
+                                padding: "2px 6px",
+                                backgroundColor: "var(--card-bg, rgba(255, 255, 255, 0.1))",
+                                border: "1px solid var(--border-color, rgba(255, 255, 255, 0.2))",
+                                borderRadius: "3px",
+                                fontSize: "0.85em",
+                                color: "var(--text-primary)",
+                              }}
+                            >
+                              {result.raw.type}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1785,6 +1819,22 @@ const SongCreate: React.FC = () => {
                           }}
                         >
                           {result.artist || "Unknown Artist"}
+                          {result.raw?.type && isBandcampUrl(result.raw?.url || "") && (
+                            <span
+                              style={{
+                                textTransform: "capitalize",
+                                marginLeft: "6px",
+                                padding: "2px 6px",
+                                backgroundColor: "var(--card-bg, rgba(255, 255, 255, 0.1))",
+                                border: "1px solid var(--border-color, rgba(255, 255, 255, 0.2))",
+                                borderRadius: "3px",
+                                fontSize: "0.85em",
+                                color: "var(--text-primary)",
+                              }}
+                            >
+                              {result.raw.type}
+                            </span>
+                          )}
                           {result.album && ` • ${result.album}`}
                         </div>
                       </div>

@@ -5,6 +5,7 @@ import {
   albumService, 
   artistService
 } from "../services/db";
+import { useAudioPlayer } from "../hooks/useAudioPlayer";
 
 interface Album {
   album_id?: number;
@@ -26,6 +27,7 @@ interface Song {
 const SongEdit: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { currentTrack, stop } = useAudioPlayer();
   const [title, setTitle] = useState("");
   const [albumId, setAlbumId] = useState("");
   const [artistId, setArtistId] = useState("");
@@ -84,7 +86,17 @@ const SongEdit: React.FC = () => {
     try {
       if (!id) return;
       const songId = parseInt(id);
+      
+      // Check if the song being deleted is currently playing
+      const isCurrentSong = currentTrack?.songId === songId;
+      
       await songService.delete(songId);
+      
+      // Stop playback if the currently playing song was deleted
+      if (isCurrentSong) {
+        stop();
+      }
+      
       navigate("/songs");
     } catch (err: any) {
       setError(err.message || "Failed to delete song");

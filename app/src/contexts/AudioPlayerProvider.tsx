@@ -203,6 +203,15 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
     setQueue((prev) => [...prev, track]);
   };
 
+  const stop = () => {
+    audioRef.current.pause();
+    audioRef.current.currentTime = 0;
+    setIsPlaying(false);
+    setCurrentTrack(null);
+    setCurrentTime(0);
+    setDuration(0);
+  };
+
   useEffect(() => {
     const audio = audioRef.current;
     const onTimeUpdate = () => setCurrentTime(audio.currentTime);
@@ -259,6 +268,7 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
     setVolume,
     playNext,
     playPrevious,
+    stop,
     queue,
     setQueue,
     addToQueue,
