@@ -19,6 +19,32 @@ const AlbumList: React.FC = () => {
   const [albums, setAlbums] = useState<AlbumWithCover[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const normalizeMatchValue = (value: string): string =>
+    value.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  const isBandcampHostMismatch = (
+    artistName: string | null,
+    pageUrl?: string | null
+  ): boolean => {
+    if (!artistName || !pageUrl) return false;
+    try {
+      const url = new URL(pageUrl);
+      const hostname = url.hostname.toLowerCase();
+      if (!hostname.endsWith("bandcamp.com")) {
+        return false;
+      }
+      const subdomain = hostname.replace(/\.bandcamp\.com$/, "");
+      const normalizedArtist = normalizeMatchValue(artistName);
+      const normalizedSubdomain = normalizeMatchValue(subdomain);
+      if (!normalizedArtist || !normalizedSubdomain) return false;
+      return (
+        !normalizedSubdomain.includes(normalizedArtist) &&
+        !normalizedArtist.includes(normalizedSubdomain)
+      );
+    } catch (e) {
+      return false;
+    }
+  };
 
   useEffect(() => {
     const loadAlbums = async () => {
@@ -110,7 +136,12 @@ const AlbumList: React.FC = () => {
               song.bandcamp_page_url && 
               song.bandcamp_page_url.includes("/track/") // Track page, not album page
             );
-            const albumArtistName = album.artist_id ? artistMap.get(album.artist_id) : null;
+            const albumArtistName = album.artist_id
+              ? artistMap.get(album.artist_id)
+              : null;
+            const hasBandcampHostMismatch = albumSongs.some((song) =>
+              isBandcampHostMismatch(albumArtistName, song.bandcamp_page_url)
+            );
             const isLikelyCompilationFromBandcamp = 
               hasBandcampTrackSongs && 
               albumSongs.length > 0 &&
@@ -118,7 +149,8 @@ const AlbumList: React.FC = () => {
               albumSongs.every((song) => song.artist_id === album.artist_id) &&
               // If all songs have the same artist_id as the album, and they're from Bandcamp track pages,
               // it's likely a compilation where we used the track artist as placeholder
-              uniqueArtistCount === 1;
+              uniqueArtistCount === 1 &&
+              hasBandcampHostMismatch;
             
             // Determine artist name to display
             let artistName: string;

@@ -238,13 +238,66 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
       return res.status(400).json({ error: "URL parameter is required" });
     }
 
-    // Validate Bandcamp URL
-    if (!url.includes("bandcamp.com")) {
+    const urlString = url.toString();
+    let urlObj;
+    try {
+      urlObj = new URL(urlString);
+    } catch (e) {
+      return res.status(400).json({ error: "Invalid URL format" });
+    }
+
+    // Basic safety checks to avoid fetching local/internal resources
+    const isDisallowedHostname = (hostname) => {
+      const lower = hostname.toLowerCase();
+      if (
+        lower === "localhost" ||
+        lower.endsWith(".localhost") ||
+        lower.endsWith(".local") ||
+        lower.endsWith(".internal")
+      ) {
+        return true;
+      }
+      if (lower === "::1") return true;
+      if (lower.startsWith("fe80:")) return true;
+      if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
+
+      if (/^\d{1,3}(\.\d{1,3}){3}$/.test(lower)) {
+        const parts = lower.split(".").map((part) => parseInt(part, 10));
+        if (parts.some((part) => Number.isNaN(part) || part > 255)) {
+          return true;
+        }
+        if (parts[0] === 10) return true;
+        if (parts[0] === 127) return true;
+        if (parts[0] === 169 && parts[1] === 254) return true;
+        if (parts[0] === 192 && parts[1] === 168) return true;
+        if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) {
+          return true;
+        }
+      }
+
+      return false;
+    };
+
+    if (!["http:", "https:"].includes(urlObj.protocol)) {
+      return res.status(400).json({ error: "Invalid URL protocol" });
+    }
+
+    if (isDisallowedHostname(urlObj.hostname)) {
       return res.status(400).json({ error: "Invalid Bandcamp URL" });
     }
 
+    // Only allow track/album pages for metadata extraction
+    if (
+      !urlObj.pathname.includes("/track/") &&
+      !urlObj.pathname.includes("/album/")
+    ) {
+      return res.status(400).json({ error: "Invalid Bandcamp URL" });
+    }
+
+    const normalizedUrl = urlObj.toString();
+
     // Fetch the Bandcamp page
-    const response = await fetch(url, {
+    const response = await fetch(normalizedUrl, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -259,8 +312,8 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
     const $ = cheerio.load(html);
 
     // Detect if this is an album or track URL
-    const isAlbum = url.includes("/album/");
-    const isTrack = url.includes("/track/");
+    const isAlbum = urlObj.pathname.includes("/album/");
+    const isTrack = urlObj.pathname.includes("/track/");
 
     // Debug: Log the first part of the HTML (development only)
     if (process.env.NODE_ENV !== "production") {
@@ -284,6 +337,178 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
 
     let allTracks = []; // For album pages
     let tralbumData = null; // Store parsed tralbum data for later use
+
+    const applyTralbumData = (data) => {
+      if (!data) return;
+      tralbumData = data;
+      if (process.env.NODE_ENV !== "production") {
+        console.log(
+          "Found data-tralbum:",
+          JSON.stringify(tralbumData, null, 2).substring(0, 500)
+        );
+      }
+
+      if (
+        tralbumData.trackinfo &&
+        Array.isArray(tralbumData.trackinfo) &&
+        tralbumData.trackinfo.length > 0
+      ) {
+        // If it's an album, extract all tracks
+        if (isAlbum) {
+          allTracks = tralbumData.trackinfo.map((track, index) => {
+            let audioUrl = "";
+            if (track.file) {
+              audioUrl =
+                track.file["mp3-128"] ||
+                track.file["mp3-v0"] ||
+                Object.values(track.file)[0] ||
+                "";
+            }
+
+            let duration = "";
+            if (track.duration) {
+              const durationSeconds = track.duration;
+              const hours = Math.floor(durationSeconds / 3600);
+              const minutes = Math.floor((durationSeconds % 3600) / 60);
+              const seconds = Math.floor(durationSeconds % 60);
+              duration = `${String(hours).padStart(2, "0")}:${String(
+                minutes
+              ).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+            }
+
+            // Parse track title to extract artist and title if in "Artist - Track Name" format
+            let trackTitle = track.title || "";
+            let trackArtist = null;
+
+            // Check for "Artist - Track Name" format (common on compilation albums)
+            // Note: Artist part may contain multiple artists like "NA-3LDK / DEFRIC"
+            // Use a pattern that matches hyphen with spaces (the separator) rather than hyphens in artist names
+            // Match from the end: look for the last " - " pattern (with spaces)
+            const lastSeparatorIndex = trackTitle.lastIndexOf(" - ");
+            if (lastSeparatorIndex > 0) {
+              trackArtist = trackTitle
+                .substring(0, lastSeparatorIndex)
+                .trim();
+              trackTitle = trackTitle
+                .substring(lastSeparatorIndex + 3)
+                .trim();
+            } else {
+              // Fallback: try pattern without spaces (but prefer the spaced version)
+              const titleMatch = trackTitle.match(/^(.+?)\s+-\s+(.+)$/);
+              if (titleMatch) {
+                trackArtist = titleMatch[1].trim();
+                trackTitle = titleMatch[2].trim();
+              }
+            }
+
+            return {
+              title: trackTitle,
+              artist: trackArtist, // Individual track artist(s) if extracted (may contain "/" or "&" for multiple)
+              duration: duration,
+              audioUrl: audioUrl,
+              trackNumber: index + 1,
+            };
+          });
+        } else {
+          // For track pages, just get the first track
+          const track = tralbumData.trackinfo[0];
+
+          // Extract audio URL
+          if (track.file) {
+            metadata.audioUrl =
+              track.file["mp3-128"] ||
+              track.file["mp3-v0"] ||
+              Object.values(track.file)[0] ||
+              "";
+            if (process.env.NODE_ENV !== "production") {
+              console.log(
+                "Extracted audio URL from data-tralbum:",
+                metadata.audioUrl
+              );
+            }
+          }
+
+          // Extract duration
+          if (track.duration) {
+            const durationSeconds = track.duration;
+            const hours = Math.floor(durationSeconds / 3600);
+            const minutes = Math.floor((durationSeconds % 3600) / 60);
+            const seconds = Math.floor(durationSeconds % 60);
+            metadata.duration = `${String(hours).padStart(2, "0")}:${String(
+              minutes
+            ).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+            if (process.env.NODE_ENV !== "production") {
+              console.log(
+                "Extracted duration from data-tralbum:",
+                metadata.duration
+              );
+            }
+          }
+
+          // Extract title
+          if (track.title) {
+            metadata.title = track.title;
+          }
+        }
+      }
+
+      // Extract artist from current object
+      if (tralbumData.artist) {
+        metadata.artist = tralbumData.artist;
+      }
+
+      // Extract album info
+      if (tralbumData.current) {
+        if (tralbumData.current.title && !metadata.title) {
+          metadata.title = tralbumData.current.title;
+        }
+        if (tralbumData.current.album_title) {
+          metadata.album = tralbumData.current.album_title;
+        }
+      }
+    };
+
+    const extractJsonObject = (source, marker) => {
+      const markerIndex = source.indexOf(marker);
+      if (markerIndex === -1) return null;
+      const startIndex = source.indexOf("{", markerIndex);
+      if (startIndex === -1) return null;
+      let depth = 0;
+      let inString = false;
+      let escapeNext = false;
+      let quoteChar = "";
+
+      for (let i = startIndex; i < source.length; i++) {
+        const ch = source[i];
+        if (inString) {
+          if (escapeNext) {
+            escapeNext = false;
+          } else if (ch === "\\") {
+            escapeNext = true;
+          } else if (ch === quoteChar) {
+            inString = false;
+          }
+          continue;
+        }
+
+        if (ch === '"' || ch === "'") {
+          inString = true;
+          quoteChar = ch;
+          continue;
+        }
+
+        if (ch === "{") {
+          depth += 1;
+        } else if (ch === "}") {
+          depth -= 1;
+          if (depth === 0) {
+            return source.slice(startIndex, i + 1);
+          }
+        }
+      }
+
+      return null;
+    };
 
     // Method 0: Search raw HTML for bcbits.com URLs (most aggressive)
     // These URLs often look like: "mp3-128":"https://t4.bcbits.com/stream/..."
@@ -331,136 +556,40 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
     if (tralbumElement.length > 0) {
       try {
         const tralbumJson = tralbumElement.attr("data-tralbum");
+        const decodeHtmlEntities = (value) =>
+          value
+            .replace(/&quot;/g, '"')
+            .replace(/&#34;/g, '"')
+            .replace(/&apos;/g, "'")
+            .replace(/&#39;/g, "'")
+            .replace(/&amp;/g, "&")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">");
         if (tralbumJson) {
-          tralbumData = JSON.parse(tralbumJson);
-          if (process.env.NODE_ENV !== "production") {
-            console.log(
-              "Found data-tralbum:",
-              JSON.stringify(tralbumData, null, 2).substring(0, 500)
-            );
-          }
-
-          if (
-            tralbumData.trackinfo &&
-            Array.isArray(tralbumData.trackinfo) &&
-            tralbumData.trackinfo.length > 0
-          ) {
-            // If it's an album, extract all tracks
-            if (isAlbum) {
-              allTracks = tralbumData.trackinfo.map((track, index) => {
-                let audioUrl = "";
-                if (track.file) {
-                  audioUrl =
-                    track.file["mp3-128"] ||
-                    track.file["mp3-v0"] ||
-                    Object.values(track.file)[0] ||
-                    "";
-                }
-
-                let duration = "";
-                if (track.duration) {
-                  const durationSeconds = track.duration;
-                  const hours = Math.floor(durationSeconds / 3600);
-                  const minutes = Math.floor((durationSeconds % 3600) / 60);
-                  const seconds = Math.floor(durationSeconds % 60);
-                  duration = `${String(hours).padStart(2, "0")}:${String(
-                    minutes
-                  ).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-                }
-
-                // Parse track title to extract artist and title if in "Artist - Track Name" format
-                let trackTitle = track.title || "";
-                let trackArtist = null;
-
-                // Check for "Artist - Track Name" format (common on compilation albums)
-                // Note: Artist part may contain multiple artists like "NA-3LDK / DEFRIC"
-                // Use a pattern that matches hyphen with spaces (the separator) rather than hyphens in artist names
-                // Match from the end: look for the last " - " pattern (with spaces)
-                const lastSeparatorIndex = trackTitle.lastIndexOf(" - ");
-                if (lastSeparatorIndex > 0) {
-                  trackArtist = trackTitle
-                    .substring(0, lastSeparatorIndex)
-                    .trim();
-                  trackTitle = trackTitle
-                    .substring(lastSeparatorIndex + 3)
-                    .trim();
-                } else {
-                  // Fallback: try pattern without spaces (but prefer the spaced version)
-                  const titleMatch = trackTitle.match(/^(.+?)\s+-\s+(.+)$/);
-                  if (titleMatch) {
-                    trackArtist = titleMatch[1].trim();
-                    trackTitle = titleMatch[2].trim();
-                  }
-                }
-
-                return {
-                  title: trackTitle,
-                  artist: trackArtist, // Individual track artist(s) if extracted (may contain "/" or "&" for multiple)
-                  duration: duration,
-                  audioUrl: audioUrl,
-                  trackNumber: index + 1,
-                };
-              });
-            } else {
-              // For track pages, just get the first track
-              const track = tralbumData.trackinfo[0];
-
-              // Extract audio URL
-              if (track.file) {
-                metadata.audioUrl =
-                  track.file["mp3-128"] ||
-                  track.file["mp3-v0"] ||
-                  Object.values(track.file)[0] ||
-                  "";
-                if (process.env.NODE_ENV !== "production") {
-                  console.log(
-                    "Extracted audio URL from data-tralbum:",
-                    metadata.audioUrl
-                  );
-                }
-              }
-
-              // Extract duration
-              if (track.duration) {
-                const durationSeconds = track.duration;
-                const hours = Math.floor(durationSeconds / 3600);
-                const minutes = Math.floor((durationSeconds % 3600) / 60);
-                const seconds = Math.floor(durationSeconds % 60);
-                metadata.duration = `${String(hours).padStart(2, "0")}:${String(
-                  minutes
-                ).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-                if (process.env.NODE_ENV !== "production") {
-                  console.log(
-                    "Extracted duration from data-tralbum:",
-                    metadata.duration
-                  );
-                }
-              }
-
-              // Extract title
-              if (track.title) {
-                metadata.title = track.title;
-              }
-            }
-          }
-
-          // Extract artist from current object
-          if (tralbumData.artist) {
-            metadata.artist = tralbumData.artist;
-          }
-
-          // Extract album info
-          if (tralbumData.current) {
-            if (tralbumData.current.title && !metadata.title) {
-              metadata.title = tralbumData.current.title;
-            }
-            if (tralbumData.current.album_title) {
-              metadata.album = tralbumData.current.album_title;
-            }
+          try {
+            const parsedTralbum = JSON.parse(tralbumJson);
+            applyTralbumData(parsedTralbum);
+          } catch (parseError) {
+            const decodedTralbumJson = decodeHtmlEntities(tralbumJson);
+            const parsedTralbum = JSON.parse(decodedTralbumJson);
+            applyTralbumData(parsedTralbum);
           }
         }
       } catch (e) {
         console.error("Error parsing data-tralbum:", e.message);
+      }
+    }
+
+    // Method 1b: Fallback to TralbumData in scripts when data-tralbum is missing
+    if (!tralbumData) {
+      const tralbumJson = extractJsonObject(html, "TralbumData");
+      if (tralbumJson) {
+        try {
+          const parsedTralbum = JSON.parse(tralbumJson);
+          applyTralbumData(parsedTralbum);
+        } catch (e) {
+          console.error("Error parsing TralbumData script:", e.message);
+        }
       }
     }
 
@@ -1032,9 +1161,6 @@ app.get("/api/bandcamp-search", async (req, res) => {
           // If title contains a bullet/dot separator, take only the first part
           // Various bullet characters: · • ‧ ●
           title = title.split(/[·•‧●]/)[0].trim();
-
-          // Remove "by Artist Name" pattern (case insensitive)
-          title = title.replace(/\s+by\s+.+$/i, "").trim();
         }
 
         // Artist (may include leading 'by ' and album name; we'll clean it)
@@ -1057,6 +1183,9 @@ app.get("/api/bandcamp-search", async (req, res) => {
           // Drop leading "by "
           artist = artist.replace(/^by\s+/i, "").trim();
 
+          // Remove "from [album] by [artist]" pattern (album may include "by")
+          artist = artist.replace(/^from\s+.+\s+by\s+/i, "").trim();
+
           // For albums, if artist still contains the album name at the end, remove it
           if (
             itemType === "album" &&
@@ -1067,10 +1196,27 @@ app.get("/api/bandcamp-search", async (req, res) => {
           }
         }
 
+        if (title && artist) {
+          const normalizedTitle = title.replace(/\s+/g, " ").trim();
+          const normalizedArtist = artist.replace(/\s+/g, " ").trim();
+          const bySuffix = ` by ${normalizedArtist}`.toLowerCase();
+          if (normalizedTitle.toLowerCase().endsWith(bySuffix)) {
+            title = normalizedTitle.slice(0, -bySuffix.length).trim();
+          } else {
+            title = normalizedTitle;
+          }
+        }
+
         // URL
         let url = $el.find("a.item-link, a.searchresult, a").attr("href") || "";
         if (url && url.startsWith("/")) {
           url = `https://bandcamp.com${url}`;
+        }
+
+        // If type is missing, infer from URL path
+        if (itemType === "unknown" && url) {
+          if (url.includes("/track/")) itemType = "track";
+          else if (url.includes("/album/")) itemType = "album";
         }
 
         // Cover image - try multiple selectors to find the album/track cover

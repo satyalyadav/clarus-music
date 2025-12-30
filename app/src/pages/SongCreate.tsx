@@ -8,6 +8,7 @@ import {
   Album,
   Artist,
 } from "../services/db";
+import { artistImageService } from "../services/artistImageService";
 
 interface SearchResult {
   title: string;
@@ -91,7 +92,93 @@ const SongCreate = (): React.ReactElement => {
 
   // Check if input is a Bandcamp URL
   const isBandcampUrl = (url: string): boolean => {
-    return /bandcamp\.com/.test(url.trim());
+    const trimmed = url.trim();
+    if (!trimmed) return false;
+    try {
+      const urlObj = new URL(trimmed);
+      if (!["http:", "https:"].includes(urlObj.protocol)) {
+        return false;
+      }
+      if (urlObj.hostname.toLowerCase().endsWith("bandcamp.com")) {
+        return true;
+      }
+      return (
+        urlObj.pathname.includes("/track/") ||
+        urlObj.pathname.includes("/album/")
+      );
+    } catch (e) {
+      return /bandcamp\.com/.test(trimmed);
+    }
+  };
+
+  const normalizeMatchValue = (value: string): string =>
+    value.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  const isBandcampArtistMismatch = (
+    artistName: string,
+    pageUrl?: string
+  ): boolean => {
+    if (!artistName || !pageUrl) return false;
+    try {
+      const urlObj = new URL(pageUrl);
+      const hostname = urlObj.hostname.toLowerCase();
+      const normalizedArtist = normalizeMatchValue(artistName);
+      if (!normalizedArtist) return false;
+
+      if (hostname.endsWith("bandcamp.com")) {
+        const subdomain = hostname.replace(/\.bandcamp\.com$/, "");
+        const normalizedSubdomain = normalizeMatchValue(subdomain);
+        if (!normalizedSubdomain) return false;
+        return (
+          !normalizedSubdomain.includes(normalizedArtist) &&
+          !normalizedArtist.includes(normalizedSubdomain)
+        );
+      }
+
+      const normalizedHost = normalizeMatchValue(hostname);
+      if (!normalizedHost) return false;
+      return (
+        !normalizedHost.includes(normalizedArtist) &&
+        !normalizedArtist.includes(normalizedHost)
+      );
+    } catch (e) {
+      return false;
+    }
+  };
+
+  const fetchBandcampArtistImage = async (
+    artistName: string
+  ): Promise<string | null> => {
+    if (!artistName || !artistName.trim()) return null;
+    try {
+      const response = await fetch(
+        `/api/bandcamp-artist-image?artist=${encodeURIComponent(artistName)}`
+      );
+      if (!response.ok) return null;
+      const data = await response.json();
+      return data.imageUrl || null;
+    } catch (err) {
+      console.error(`Error fetching Bandcamp image for ${artistName}:`, err);
+      return null;
+    }
+  };
+
+  const getBandcampResultType = (result: SearchResult): string | null => {
+    const rawType = result.raw?.type;
+    if (rawType) {
+      return rawType;
+    }
+    const url = result.raw?.url || "";
+    if (!isBandcampUrl(url)) {
+      return null;
+    }
+    if (url.includes("/track/")) {
+      return "track";
+    }
+    if (url.includes("/album/")) {
+      return "album";
+    }
+    return null;
   };
 
   // Extract Bandcamp metadata from backend
@@ -130,6 +217,7 @@ const SongCreate = (): React.ReactElement => {
           url, // Original page URL
           audioUrl: data.audioUrl || null, // Actual audio stream URL (may be null if extraction failed)
           duration: data.duration || null,
+          source: "bandcamp",
         },
       };
     } catch (error: any) {
@@ -188,6 +276,9 @@ const SongCreate = (): React.ReactElement => {
       .map((s) => s.trim())
       .filter(Boolean);
   };
+
+  const normalizeArtistName = (value: string): string =>
+    value.toLowerCase().replace(/\s+/g, " ").trim();
 
   // Validate and fetch a reliable artist image from Spotify
   const validateAndGetArtistImage = async (
@@ -363,6 +454,7 @@ const SongCreate = (): React.ReactElement => {
                   coverArt: coverArt,
                   raw: {
                     ...item,
+                    source: "bandcamp",
                   },
                 };
               }
@@ -499,8 +591,19 @@ const SongCreate = (): React.ReactElement => {
     // Store metadata for later use (album, artist, artistImage)
     let bandcampMetadata: any = null;
 
+    const isBandcampResult =
+      result.raw?.source === "bandcamp" ||
+      (result.raw?.url && isBandcampUrl(result.raw.url));
+    const bandcampUrl = result.raw?.url || "";
+
     // If this is a Bandcamp result, store the audio stream URL (prefer audioUrl over page URL)
-    if (result.raw?.url && isBandcampUrl(result.raw.url)) {
+    if (isBandcampResult) {
+      if (!bandcampUrl) {
+        setError("Bandcamp URL missing from search result.");
+        setSongUrl("");
+        setBandcampPageUrl("");
+        return;
+      }
       // Try to use a pre-extracted audio URL if present (from direct URL paste flow)
       let audioStreamUrl: string | undefined = result.raw.audioUrl;
 
@@ -515,7 +618,7 @@ const SongCreate = (): React.ReactElement => {
       // (even if we already have a valid audio URL)
       try {
         const resp = await fetch(
-          `/api/bandcamp-metadata?url=${encodeURIComponent(result.raw.url)}`
+          `/api/bandcamp-metadata?url=${encodeURIComponent(bandcampUrl)}`
         );
         if (!resp.ok) {
           throw new Error("Failed to extract Bandcamp metadata from URL");
@@ -588,7 +691,7 @@ const SongCreate = (): React.ReactElement => {
         const pageUrl =
           bandcampMetadata?.pageUrl ||
           result.raw.pageUrl ||
-          result.raw.url ||
+          bandcampUrl ||
           "";
         setBandcampPageUrl(pageUrl);
         setFile(null); // Clear file when URL is set
@@ -608,7 +711,7 @@ const SongCreate = (): React.ReactElement => {
             "Failed to extract valid audio URL from Bandcamp page. Got:",
             audioStreamUrl,
             "Page URL:",
-            result.raw.url
+            bandcampUrl
           );
         }
       }
@@ -618,9 +721,6 @@ const SongCreate = (): React.ReactElement => {
     }
 
     try {
-      // For Bandcamp results, only use the primary artist (no featured artists parsing)
-      const isBandcampResult = result.raw?.url && isBandcampUrl(result.raw.url);
-
       // Use metadata from Bandcamp if available (more accurate than search results)
       let bandcampArtist = result.artist;
       let bandcampAlbum = result.album;
@@ -689,17 +789,38 @@ const SongCreate = (): React.ReactElement => {
         }
       }
 
+      const createdArtistsByName = new Map<string, Artist>();
+      const getOrCreateArtist = async (
+        rawName: string
+      ): Promise<Artist | null> => {
+        const trimmedName = rawName.trim();
+        if (!trimmedName) return null;
+        const normalizedName = normalizeArtistName(trimmedName);
+        const existing =
+          createdArtistsByName.get(normalizedName) ||
+          artists.find(
+            (a) => normalizeArtistName(a.name) === normalizedName
+          );
+        if (existing) {
+          createdArtistsByName.set(normalizedName, existing);
+          return existing;
+        }
+
+        const newId = await artistService.create({ name: trimmedName });
+        const artist = { artist_id: newId, name: trimmedName };
+        createdArtistsByName.set(normalizedName, artist);
+        setArtists((prev) => [...prev, artist!]);
+        return artist;
+      };
+
+      effectiveNames = effectiveNames.map((name) => name.trim()).filter(Boolean);
+
       let primaryArtistId: number | null = null;
       const allArtistIds: number[] = [];
 
       for (const name of effectiveNames) {
-        let artist = artists.find((a) => a.name === name);
-        if (!artist) {
-          const newId = await artistService.create({ name });
-          artist = { artist_id: newId, name };
-          setArtists((prev) => [...prev, artist!]);
-        }
-        if (artist.artist_id != null) {
+        const artist = await getOrCreateArtist(name);
+        if (artist?.artist_id != null) {
           allArtistIds.push(artist.artist_id);
           if (primaryArtistId == null) {
             primaryArtistId = artist.artist_id;
@@ -837,15 +958,8 @@ const SongCreate = (): React.ReactElement => {
             // albumArtistId already set to primaryArtistId, which is correct
           } else {
             // Use the album artist from Bandcamp if available
-            let albumArtist = artists.find((a) => a.name === albumArtistName);
-            if (!albumArtist) {
-              const newId = await artistService.create({
-                name: albumArtistName,
-              });
-              albumArtist = { artist_id: newId, name: albumArtistName };
-              setArtists((prev) => [...prev, albumArtist!]);
-            }
-            if (albumArtist.artist_id != null) {
+            const albumArtist = await getOrCreateArtist(albumArtistName);
+            if (albumArtist?.artist_id != null) {
               albumArtistId = albumArtist.artist_id;
             }
           }
@@ -1073,6 +1187,7 @@ const SongCreate = (): React.ReactElement => {
       // For "Various Artists" albums, we don't create an artist entity
       // Each track will have its own individual artist
       let albumArtistId: number | null = null;
+      let albumArtistForTracks: Artist | null = null;
 
       if (!isVariousArtists && albumResult.artist) {
         // Create album artist only if it's not "Various Artists"
@@ -1086,13 +1201,52 @@ const SongCreate = (): React.ReactElement => {
         }
         if (albumArtist.artist_id != null) {
           albumArtistId = albumArtist.artist_id;
+          albumArtistForTracks = albumArtist;
 
-          // Update artist image if Bandcamp provided one
-          if (albumResult.artistImage) {
+          const hasArtistMismatch = isBandcampArtistMismatch(
+            albumResult.artist,
+            albumResult.pageUrl
+          );
+
+          if (hasArtistMismatch) {
+            try {
+              const bandcampImage = await fetchBandcampArtistImage(
+                albumResult.artist
+              );
+              const resolvedImage = await artistImageService.fetchArtistImage(
+                albumResult.artist,
+                bandcampImage || undefined
+              );
+
+              if (resolvedImage) {
+                await artistService.update(albumArtist.artist_id, {
+                  image_url: resolvedImage,
+                });
+                albumArtistForTracks = {
+                  ...albumArtist,
+                  image_url: resolvedImage,
+                };
+                setArtists((prev) =>
+                  prev.map((a) =>
+                    a.artist_id === albumArtist.artist_id
+                      ? { ...a, image_url: resolvedImage }
+                      : a
+                  )
+                );
+              }
+            } catch (err) {
+              console.error("Error resolving artist image:", err);
+            }
+          } else if (albumResult.artistImage) {
+            // Update artist image if Bandcamp provided one
             try {
               await artistService.update(albumArtist.artist_id, {
                 image_url: albumResult.artistImage,
               });
+              albumArtistForTracks = {
+                ...albumArtist,
+                image_url: albumResult.artistImage,
+              };
               setArtists((prev) =>
                 prev.map((a) =>
                   a.artist_id === albumArtist.artist_id
@@ -1205,7 +1359,8 @@ const SongCreate = (): React.ReactElement => {
 
           if ((firstTrack as any).artist) {
             trackArtistName = (firstTrack as any).artist;
-          } else {
+          } else if (isVariousArtists) {
+            // Only parse "Artist - Track Name" format for compilation albums
             // Parse "Artist - Track Name" format
             // Use lastIndexOf to find the separator (handles artist names with hyphens like "NA-3LDK")
             const lastSeparatorIndex = trackTitle.lastIndexOf(" - ");
@@ -1221,6 +1376,7 @@ const SongCreate = (): React.ReactElement => {
               }
             }
           }
+          // For regular albums, trackArtistName stays null and we'll use album artist
 
           if (trackArtistName) {
             const trackArtists = await getOrCreateArtists(trackArtistName);
@@ -1273,26 +1429,36 @@ const SongCreate = (): React.ReactElement => {
           let trackTitle = track.title || "";
           let trackArtistName: string | null = null;
 
-          // Check if backend already extracted the artist
-          if ((track as any).artist) {
-            trackArtistName = (track as any).artist;
-          } else {
-            // Parse "Artist - Track Name" format
-            // Use lastIndexOf to find the separator (handles artist names with hyphens like "NA-3LDK")
-            const lastSeparatorIndex = trackTitle.lastIndexOf(" - ");
-            if (lastSeparatorIndex > 0) {
-              trackArtistName = trackTitle
-                .substring(0, lastSeparatorIndex)
-                .trim();
-              trackTitle = trackTitle.substring(lastSeparatorIndex + 3).trim();
+          // Only parse "Artist - Track Name" format if this is a "Various Artists" compilation
+          // For regular albums, all tracks are by the album artist
+          if (isVariousArtists) {
+            // Check if backend already extracted the artist
+            if ((track as any).artist) {
+              trackArtistName = (track as any).artist;
             } else {
-              // Fallback: try pattern with spaces
-              const titleMatch = trackTitle.match(/^(.+?)\s+-\s+(.+)$/);
-              if (titleMatch) {
-                trackArtistName = titleMatch[1].trim();
-                trackTitle = titleMatch[2].trim();
+              // Parse "Artist - Track Name" format
+              // Use lastIndexOf to find the separator (handles artist names with hyphens like "NA-3LDK")
+              const lastSeparatorIndex = trackTitle.lastIndexOf(" - ");
+              if (lastSeparatorIndex > 0) {
+                trackArtistName = trackTitle
+                  .substring(0, lastSeparatorIndex)
+                  .trim();
+                trackTitle = trackTitle
+                  .substring(lastSeparatorIndex + 3)
+                  .trim();
+              } else {
+                // Fallback: try pattern with spaces
+                const titleMatch = trackTitle.match(/^(.+?)\s+-\s+(.+)$/);
+                if (titleMatch) {
+                  trackArtistName = titleMatch[1].trim();
+                  trackTitle = titleMatch[2].trim();
+                }
               }
             }
+          } else {
+            // For regular albums, use the album artist for all tracks
+            // Don't parse the title - keep it as-is
+            trackArtistName = null; // Will use album artist as fallback
           }
 
           // Get or create track artist(s) - handles multiple artists like "NA-3LDK / DEFRIC"
@@ -1301,16 +1467,16 @@ const SongCreate = (): React.ReactElement => {
             trackArtists = await getOrCreateArtists(trackArtistName);
           }
 
-          // Fallback: use album artist if no track artist found
+          // Fallback: use album artist if no track artist found (or for regular albums)
           if (trackArtists.length === 0) {
             if (!albumArtistId) {
               throw new Error(
                 `Could not determine artist for track "${track.title}"`
               );
             }
-            const albumArtist = artists.find(
-              (a) => a.artist_id === albumArtistId
-            );
+            const albumArtist =
+              albumArtistForTracks ||
+              artists.find((a) => a.artist_id === albumArtistId);
             if (albumArtist) {
               trackArtists = [albumArtist];
             }
@@ -1784,58 +1950,59 @@ const SongCreate = (): React.ReactElement => {
                     </div>
                   )}
                   {!searchLoading &&
-                    searchResults.map((result, index) => (
-                      <div
-                        key={index}
-                        onClick={() => handleSelectResult(result)}
-                        style={{
-                          padding: "12px",
-                          cursor: "pointer",
-                          borderBottom: "1px solid var(--border-color)",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "12px",
-                          backgroundColor: "var(--card-bg)",
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor =
-                            "var(--button-hover)";
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor =
-                            "var(--card-bg)";
-                        }}
-                      >
-                        {result.coverArt && (
-                          <img
-                            src={result.coverArt}
-                            alt=""
-                            style={{
-                              width: "50px",
-                              height: "50px",
-                              objectFit: "cover",
-                              borderRadius: "4px",
-                            }}
-                          />
-                        )}
-                        <div style={{ flex: 1 }}>
-                          <div
-                            style={{
-                              fontWeight: "bold",
-                              color: "var(--text-primary)",
-                            }}
-                          >
-                            {result.title || "Unknown"}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "0.9em",
-                              color: "var(--text-secondary)",
-                            }}
-                          >
-                            {result.artist || "Unknown Artist"}
-                            {result.raw?.type &&
-                              isBandcampUrl(result.raw?.url || "") && (
+                    searchResults.map((result, index) => {
+                      const resultType = getBandcampResultType(result);
+                      return (
+                        <div
+                          key={index}
+                          onClick={() => handleSelectResult(result)}
+                          style={{
+                            padding: "12px",
+                            cursor: "pointer",
+                            borderBottom: "1px solid var(--border-color)",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "12px",
+                            backgroundColor: "var(--card-bg)",
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor =
+                              "var(--button-hover)";
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor =
+                              "var(--card-bg)";
+                          }}
+                        >
+                          {result.coverArt && (
+                            <img
+                              src={result.coverArt}
+                              alt=""
+                              style={{
+                                width: "50px",
+                                height: "50px",
+                                objectFit: "cover",
+                                borderRadius: "4px",
+                              }}
+                            />
+                          )}
+                          <div style={{ flex: 1 }}>
+                            <div
+                              style={{
+                                fontWeight: "bold",
+                                color: "var(--text-primary)",
+                              }}
+                            >
+                              {result.title || "Unknown"}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: "0.9em",
+                                color: "var(--text-secondary)",
+                              }}
+                            >
+                              {result.artist || "Unknown Artist"}
+                              {resultType && (
                                 <span
                                   style={{
                                     textTransform: "capitalize",
@@ -1850,14 +2017,15 @@ const SongCreate = (): React.ReactElement => {
                                     color: "var(--text-primary)",
                                   }}
                                 >
-                                  {result.raw.type}
+                                  {resultType}
                                 </span>
                               )}
-                            {result.album && ` • ${result.album}`}
+                              {result.album && ` • ${result.album}`}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                 </div>
               )}
             </div>
@@ -1980,62 +2148,63 @@ const SongCreate = (): React.ReactElement => {
                   </div>
                 )}
                 {!searchLoading &&
-                  searchResults.map((result, index) => (
-                    <div
-                      key={index}
-                      onClick={() => handleSelectResult(result)}
-                      style={{
-                        padding: "12px",
-                        cursor: "pointer",
-                        borderBottom: "1px solid var(--border-color)",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "12px",
-                        backgroundColor: "var(--card-bg)",
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.backgroundColor =
-                          "var(--button-hover)";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.backgroundColor =
-                          "var(--card-bg)";
-                      }}
-                    >
-                      {result.coverArt && (
-                        <img
-                          src={result.coverArt}
-                          alt=""
-                          style={{
-                            width: "50px",
-                            height: "50px",
-                            objectFit: "cover",
-                            borderRadius: "4px",
-                          }}
-                        />
-                      )}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div
-                          style={{
-                            fontWeight: "bold",
-                            color: "var(--text-primary)",
-                            marginBottom: "4px",
-                          }}
-                        >
-                          {result.title}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "0.9em",
-                            color: "var(--text-secondary)",
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          {result.artist}
-                          {result.raw?.type &&
-                            isBandcampUrl(result.raw?.url || "") && (
+                  searchResults.map((result, index) => {
+                    const resultType = getBandcampResultType(result);
+                    return (
+                      <div
+                        key={index}
+                        onClick={() => handleSelectResult(result)}
+                        style={{
+                          padding: "12px",
+                          cursor: "pointer",
+                          borderBottom: "1px solid var(--border-color)",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "12px",
+                          backgroundColor: "var(--card-bg)",
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor =
+                            "var(--button-hover)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor =
+                            "var(--card-bg)";
+                        }}
+                      >
+                        {result.coverArt && (
+                          <img
+                            src={result.coverArt}
+                            alt=""
+                            style={{
+                              width: "50px",
+                              height: "50px",
+                              objectFit: "cover",
+                              borderRadius: "4px",
+                            }}
+                          />
+                        )}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontWeight: "bold",
+                              color: "var(--text-primary)",
+                              marginBottom: "4px",
+                            }}
+                          >
+                            {result.title}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "0.9em",
+                              color: "var(--text-secondary)",
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                          >
+                            {result.artist}
+                            {resultType && (
                               <span
                                 style={{
                                   textTransform: "capitalize",
@@ -2050,13 +2219,14 @@ const SongCreate = (): React.ReactElement => {
                                   color: "var(--text-primary)",
                                 }}
                               >
-                                {result.raw.type}
+                                {resultType}
                               </span>
                             )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
               </div>
             )}
             {songUrl && (
@@ -2124,58 +2294,59 @@ const SongCreate = (): React.ReactElement => {
                   </div>
                 )}
                 {!searchLoading &&
-                  searchResults.map((result, index) => (
-                    <div
-                      key={index}
-                      onClick={() => handleSelectResult(result)}
-                      style={{
-                        padding: "12px",
-                        cursor: "pointer",
-                        borderBottom: "1px solid var(--border-color)",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "12px",
-                        backgroundColor: "var(--card-bg)",
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.backgroundColor =
-                          "var(--button-hover)";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.backgroundColor =
-                          "var(--card-bg)";
-                      }}
-                    >
-                      {result.coverArt && (
-                        <img
-                          src={result.coverArt}
-                          alt=""
-                          style={{
-                            width: "50px",
-                            height: "50px",
-                            objectFit: "cover",
-                            borderRadius: "4px",
-                          }}
-                        />
-                      )}
-                      <div style={{ flex: 1 }}>
-                        <div
-                          style={{
-                            fontWeight: "bold",
-                            color: "var(--text-primary)",
-                          }}
-                        >
-                          {result.title || "Unknown"}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "0.9em",
-                            color: "var(--text-secondary)",
-                          }}
-                        >
-                          {result.artist || "Unknown Artist"}
-                          {result.raw?.type &&
-                            isBandcampUrl(result.raw?.url || "") && (
+                  searchResults.map((result, index) => {
+                    const resultType = getBandcampResultType(result);
+                    return (
+                      <div
+                        key={index}
+                        onClick={() => handleSelectResult(result)}
+                        style={{
+                          padding: "12px",
+                          cursor: "pointer",
+                          borderBottom: "1px solid var(--border-color)",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "12px",
+                          backgroundColor: "var(--card-bg)",
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor =
+                            "var(--button-hover)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor =
+                            "var(--card-bg)";
+                        }}
+                      >
+                        {result.coverArt && (
+                          <img
+                            src={result.coverArt}
+                            alt=""
+                            style={{
+                              width: "50px",
+                              height: "50px",
+                              objectFit: "cover",
+                              borderRadius: "4px",
+                            }}
+                          />
+                        )}
+                        <div style={{ flex: 1 }}>
+                          <div
+                            style={{
+                              fontWeight: "bold",
+                              color: "var(--text-primary)",
+                            }}
+                          >
+                            {result.title || "Unknown"}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "0.9em",
+                              color: "var(--text-secondary)",
+                            }}
+                          >
+                            {result.artist || "Unknown Artist"}
+                            {resultType && (
                               <span
                                 style={{
                                   textTransform: "capitalize",
@@ -2190,14 +2361,15 @@ const SongCreate = (): React.ReactElement => {
                                   color: "var(--text-primary)",
                                 }}
                               >
-                                {result.raw.type}
+                                {resultType}
                               </span>
                             )}
-                          {result.album && ` • ${result.album}`}
+                            {result.album && ` • ${result.album}`}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
               </div>
             )}
           </div>
