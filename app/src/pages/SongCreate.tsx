@@ -253,11 +253,15 @@ const SongCreate = (): React.ReactElement => {
   };
 
   // Split artist names on common separators and normalize
-  const splitArtistNames = (raw: string): string[] => {
+  const splitArtistNames = (
+    raw: string,
+    options?: { includeFeaturing?: boolean }
+  ): string[] => {
     if (!raw) return [];
-    const cleaned = raw
-      .replace(/\s+feat\.?/gi, ",")
-      .replace(/\s+featuring/gi, ",");
+    const includeFeaturing = options?.includeFeaturing !== false;
+    const cleaned = includeFeaturing
+      ? raw.replace(/\s+feat\.?/gi, ",").replace(/\s+featuring/gi, ",")
+      : raw;
     return cleaned
       .split(/,|&| x | X |\/|\\/gi)
       .map((s) => s.trim())
@@ -759,9 +763,13 @@ const SongCreate = (): React.ReactElement => {
       let effectiveNames: string[] = [];
 
       if (isBandcampResult) {
-        // For Bandcamp, always use only the primary artist (no featured artists)
+        // For Bandcamp, split only on explicit collaboration separators
         if (bandcampArtist) {
-          effectiveNames = [bandcampArtist];
+          const bandcampNames = splitArtistNames(bandcampArtist, {
+            includeFeaturing: false,
+          });
+          effectiveNames =
+            bandcampNames.length > 0 ? bandcampNames : [bandcampArtist];
         }
       } else {
         // For Spotify, parse artist names (including featured artists)
@@ -1117,13 +1125,10 @@ const SongCreate = (): React.ReactElement => {
       // Associate artists with this song (many-to-many)
       const primaryId = parseInt(artistId);
 
-      // For Bandcamp songs, only use the primary artist (no featured artists)
-      // For other sources (Spotify, file uploads), use all detected artists
-      const isBandcampSong =
-        !!bandcampPageUrl || (songUrl && isBandcampUrl(songUrl));
-      const artistIdsToAssociate = isBandcampSong
-        ? [primaryId] // Only primary artist for Bandcamp
-        : Array.from(new Set([primaryId, ...selectedArtistIds])); // All artists for others
+      // Always associate all detected artists; Bandcamp uses explicit separators only
+      const artistIdsToAssociate = Array.from(
+        new Set([primaryId, ...selectedArtistIds])
+      );
 
       if (import.meta.env.DEV) {
         console.log("Associating song with artists:", {
@@ -1131,7 +1136,7 @@ const SongCreate = (): React.ReactElement => {
           primaryArtistId: primaryId,
           allArtistIds: artistIdsToAssociate,
           selectedArtistIds: selectedArtistIds,
-          isBandcampSong,
+          isBandcampSong: !!bandcampPageUrl || (songUrl && isBandcampUrl(songUrl)),
         });
       }
 
@@ -1188,47 +1193,61 @@ const SongCreate = (): React.ReactElement => {
       // Each track will have its own individual artist
       let albumArtistId: number | null = null;
       let albumArtistForTracks: Artist | null = null;
+      let albumArtistsForTracks: Artist[] = [];
 
       if (!isVariousArtists && albumResult.artist) {
         // Create album artist only if it's not "Various Artists"
-        let albumArtist = artists.find((a) => a.name === albumResult.artist);
-        if (!albumArtist) {
-          const newId = await artistService.create({
-            name: albumResult.artist,
-          });
-          albumArtist = { artist_id: newId, name: albumResult.artist };
-          setArtists((prev) => [...prev, albumArtist!]);
+        const parsedAlbumArtistNames = splitArtistNames(albumResult.artist, {
+          includeFeaturing: false,
+        });
+        const albumArtistNames =
+          parsedAlbumArtistNames.length > 0
+            ? parsedAlbumArtistNames
+            : [albumResult.artist];
+
+        for (const artistName of albumArtistNames) {
+          let albumArtist = artists.find((a) => a.name === artistName);
+          if (!albumArtist) {
+            const newId = await artistService.create({ name: artistName });
+            albumArtist = { artist_id: newId, name: artistName };
+            setArtists((prev) => [...prev, albumArtist!]);
+          }
+          if (albumArtist) {
+            albumArtistsForTracks.push(albumArtist);
+          }
         }
-        if (albumArtist.artist_id != null) {
-          albumArtistId = albumArtist.artist_id;
-          albumArtistForTracks = albumArtist;
+
+        const primaryAlbumArtist = albumArtistsForTracks[0] || null;
+        if (primaryAlbumArtist?.artist_id != null) {
+          albumArtistId = primaryAlbumArtist.artist_id;
+          albumArtistForTracks = primaryAlbumArtist;
 
           const hasArtistMismatch = isBandcampArtistMismatch(
-            albumResult.artist,
+            primaryAlbumArtist.name,
             albumResult.pageUrl
           );
 
           if (hasArtistMismatch) {
             try {
               const bandcampImage = await fetchBandcampArtistImage(
-                albumResult.artist
+                primaryAlbumArtist.name
               );
               const resolvedImage = await artistImageService.fetchArtistImage(
-                albumResult.artist,
+                primaryAlbumArtist.name,
                 bandcampImage || undefined
               );
 
               if (resolvedImage) {
-                await artistService.update(albumArtist.artist_id, {
+                await artistService.update(primaryAlbumArtist.artist_id, {
                   image_url: resolvedImage,
                 });
                 albumArtistForTracks = {
-                  ...albumArtist,
+                  ...primaryAlbumArtist,
                   image_url: resolvedImage,
                 };
                 setArtists((prev) =>
                   prev.map((a) =>
-                    a.artist_id === albumArtist.artist_id
+                    a.artist_id === primaryAlbumArtist.artist_id
                       ? { ...a, image_url: resolvedImage }
                       : a
                   )
@@ -1240,16 +1259,16 @@ const SongCreate = (): React.ReactElement => {
           } else if (albumResult.artistImage) {
             // Update artist image if Bandcamp provided one
             try {
-              await artistService.update(albumArtist.artist_id, {
+              await artistService.update(primaryAlbumArtist.artist_id, {
                 image_url: albumResult.artistImage,
               });
               albumArtistForTracks = {
-                ...albumArtist,
+                ...primaryAlbumArtist,
                 image_url: albumResult.artistImage,
               };
               setArtists((prev) =>
                 prev.map((a) =>
-                  a.artist_id === albumArtist.artist_id
+                  a.artist_id === primaryAlbumArtist.artist_id
                     ? { ...a, image_url: albumResult.artistImage }
                     : a
                 )
@@ -1467,7 +1486,11 @@ const SongCreate = (): React.ReactElement => {
             trackArtists = await getOrCreateArtists(trackArtistName);
           }
 
-          // Fallback: use album artist if no track artist found (or for regular albums)
+          if (!isVariousArtists && trackArtists.length === 0) {
+            trackArtists = albumArtistsForTracks;
+          }
+
+          // Fallback: use album artist if no track artist found
           if (trackArtists.length === 0) {
             if (!albumArtistId) {
               throw new Error(
