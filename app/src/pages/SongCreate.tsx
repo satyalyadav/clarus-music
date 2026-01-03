@@ -148,7 +148,7 @@ const SongCreate = (): React.ReactElement => {
 
   const fetchBandcampArtistImage = async (
     artistName: string
-  ): Promise<string | null> => {
+  ): Promise<{ imageUrl: string; sourceUrl: string | null } | null> => {
     if (!artistName || !artistName.trim()) return null;
     try {
       const response = await fetch(
@@ -156,7 +156,13 @@ const SongCreate = (): React.ReactElement => {
       );
       if (!response.ok) return null;
       const data = await response.json();
-      return data.imageUrl || null;
+      if (!data.imageUrl) {
+        return null;
+      }
+      return {
+        imageUrl: data.imageUrl,
+        sourceUrl: data.sourceUrl || null,
+      };
     } catch (err) {
       console.error(`Error fetching Bandcamp image for ${artistName}:`, err);
       return null;
@@ -287,7 +293,7 @@ const SongCreate = (): React.ReactElement => {
   // Validate and fetch a reliable artist image from Spotify
   const validateAndGetArtistImage = async (
     artistId: string
-  ): Promise<string | null> => {
+  ): Promise<{ imageUrl: string; sourceUrl: string | null } | null> => {
     try {
       const response = await fetch(`/api/spotify-artist/${artistId}`);
       if (!response.ok) {
@@ -302,19 +308,20 @@ const SongCreate = (): React.ReactElement => {
       if (Array.isArray(artistData.images) && artistData.images.length > 0) {
         // Spotify typically returns largest image first
         const imageUrl = artistData.images[0].url;
+        const sourceUrl = artistData.external_urls?.spotify || null;
 
         try {
           // Optional: basic validation that URL responds
           const headResponse = await fetch(imageUrl, { method: "HEAD" });
           if (headResponse.ok) {
-            return imageUrl;
+            return { imageUrl, sourceUrl };
           }
         } catch (e) {
           // If HEAD fails (CORS, etc.), still return URL
           console.warn("Artist image HEAD validation failed:", e);
         }
 
-        return imageUrl;
+        return { imageUrl, sourceUrl };
       }
 
       return null;
@@ -874,18 +881,25 @@ const SongCreate = (): React.ReactElement => {
 
               if (spotifyArtistId) {
                 try {
-                  const validatedImageUrl = await validateAndGetArtistImage(
+                  const validated = await validateAndGetArtistImage(
                     spotifyArtistId
                   );
-                  if (validatedImageUrl) {
+                  if (validated?.imageUrl) {
                     await artistService.update(dbArtistId, {
-                      image_url: validatedImageUrl,
+                      image_url: validated.imageUrl,
+                      image_source_url: validated.sourceUrl,
+                      image_source_provider: "spotify",
                     });
                     // Update local state
                     setArtists((prev) =>
                       prev.map((a) =>
                         a.artist_id === dbArtistId
-                          ? { ...a, image_url: validatedImageUrl }
+                          ? {
+                              ...a,
+                              image_url: validated.imageUrl,
+                              image_source_url: validated.sourceUrl,
+                              image_source_provider: "spotify",
+                            }
                           : a
                       )
                     );
@@ -906,13 +920,21 @@ const SongCreate = (): React.ReactElement => {
         } else if (bandcampArtistImage && isBandcampResult) {
           // Fallback: if no Spotify IDs, still use Bandcamp image when available
           try {
+            const sourceUrl = bandcampMetadata?.pageUrl || bandcampUrl || null;
             await artistService.update(primaryArtistId, {
               image_url: bandcampArtistImage,
+              image_source_url: sourceUrl,
+              image_source_provider: "bandcamp",
             });
             setArtists((prev) =>
               prev.map((a) =>
                 a.artist_id === primaryArtistId
-                  ? { ...a, image_url: bandcampArtistImage }
+                  ? {
+                      ...a,
+                      image_url: bandcampArtistImage,
+                      image_source_url: sourceUrl,
+                      image_source_provider: "bandcamp",
+                    }
                   : a
               )
             );
@@ -1234,21 +1256,31 @@ const SongCreate = (): React.ReactElement => {
               );
               const resolvedImage = await artistImageService.fetchArtistImage(
                 primaryAlbumArtist.name,
-                bandcampImage || undefined
+                bandcampImage?.imageUrl,
+                bandcampImage?.sourceUrl || undefined
               );
 
-              if (resolvedImage) {
+              if (resolvedImage?.imageUrl) {
                 await artistService.update(primaryAlbumArtist.artist_id, {
-                  image_url: resolvedImage,
+                  image_url: resolvedImage.imageUrl,
+                  image_source_url: resolvedImage.sourceUrl,
+                  image_source_provider: resolvedImage.sourceProvider,
                 });
                 albumArtistForTracks = {
                   ...primaryAlbumArtist,
-                  image_url: resolvedImage,
+                  image_url: resolvedImage.imageUrl,
+                  image_source_url: resolvedImage.sourceUrl,
+                  image_source_provider: resolvedImage.sourceProvider,
                 };
                 setArtists((prev) =>
                   prev.map((a) =>
                     a.artist_id === primaryAlbumArtist.artist_id
-                      ? { ...a, image_url: resolvedImage }
+                      ? {
+                          ...a,
+                          image_url: resolvedImage.imageUrl,
+                          image_source_url: resolvedImage.sourceUrl,
+                          image_source_provider: resolvedImage.sourceProvider,
+                        }
                       : a
                   )
                 );
@@ -1259,17 +1291,27 @@ const SongCreate = (): React.ReactElement => {
           } else if (albumResult.artistImage) {
             // Update artist image if Bandcamp provided one
             try {
+              const sourceUrl = albumResult.pageUrl || null;
               await artistService.update(primaryAlbumArtist.artist_id, {
                 image_url: albumResult.artistImage,
+                image_source_url: sourceUrl,
+                image_source_provider: "bandcamp",
               });
               albumArtistForTracks = {
                 ...primaryAlbumArtist,
                 image_url: albumResult.artistImage,
+                image_source_url: sourceUrl,
+                image_source_provider: "bandcamp",
               };
               setArtists((prev) =>
                 prev.map((a) =>
                   a.artist_id === primaryAlbumArtist.artist_id
-                    ? { ...a, image_url: albumResult.artistImage }
+                    ? {
+                        ...a,
+                        image_url: albumResult.artistImage,
+                        image_source_url: sourceUrl,
+                        image_source_provider: "bandcamp",
+                      }
                     : a
                 )
               );
@@ -1338,14 +1380,27 @@ const SongCreate = (): React.ReactElement => {
               if (response.ok) {
                 const data = await response.json();
                 if (data.imageUrl) {
+                  const sourceUrl = data.sourceUrl || null;
                   await artistService.update(newId, {
                     image_url: data.imageUrl,
+                    image_source_url: sourceUrl,
+                    image_source_provider: "bandcamp",
                   });
-                  artist = { ...artist, image_url: data.imageUrl };
+                  artist = {
+                    ...artist,
+                    image_url: data.imageUrl,
+                    image_source_url: sourceUrl,
+                    image_source_provider: "bandcamp",
+                  };
                   setArtists((prev) =>
                     prev.map((a) =>
                       a.artist_id === newId
-                        ? { ...a, image_url: data.imageUrl }
+                        ? {
+                            ...a,
+                            image_url: data.imageUrl,
+                            image_source_url: sourceUrl,
+                            image_source_provider: "bandcamp",
+                          }
                         : a
                     )
                   );

@@ -16,6 +16,8 @@ interface Artist {
   artist_id?: number;
   name: string;
   image_url?: string | null;
+  image_source_url?: string | null;
+  image_source_provider?: string | null;
   songs: SongWithRelations[];
 }
 
@@ -89,9 +91,18 @@ const ArtistDetail: React.FC = () => {
           if (artistData.artist_id && artistData.name && !artistData.image_url) {
             artistImageService
               .fetchAndUpdateArtistImage(artistData.artist_id, artistData.name)
-              .then((imageUrl) => {
-                if (imageUrl) {
-                  setArtist((prev) => (prev ? { ...prev, image_url: imageUrl } : null));
+              .then((imageInfo) => {
+                if (imageInfo?.imageUrl) {
+                  setArtist((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          image_url: imageInfo.imageUrl,
+                          image_source_url: imageInfo.sourceUrl,
+                          image_source_provider: imageInfo.sourceProvider,
+                        }
+                      : null
+                  );
                 }
               })
               .catch((err) => {
@@ -217,9 +228,49 @@ const ArtistDetail: React.FC = () => {
           )}
         </div>
         <div>
-          <h1 className="section-title" style={{ marginBottom: "16px" }}>
-            {artist.name}
-          </h1>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              marginBottom: "16px",
+            }}
+          >
+            <h1 className="section-title" style={{ margin: 0 }}>
+              {artist.name}
+            </h1>
+            {artist.image_source_url && (
+              <a
+                href={artist.image_source_url}
+                target="_blank"
+                rel="noreferrer"
+                aria-label={`Open ${artist.image_source_provider || "artist"} page`}
+                title={`Open ${artist.image_source_provider || "artist"} page`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: "24px",
+                  height: "24px",
+                  color: "var(--text-secondary)",
+                  borderRadius: "6px",
+                  border: "1px solid var(--border-color)",
+                  textDecoration: "none",
+                }}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="14"
+                  height="14"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path d="M14 3h7v7h-2V6.41l-8.29 8.3-1.42-1.42 8.3-8.29H14V3z" />
+                  <path d="M5 5h6v2H7v10h10v-4h2v6H5V5z" />
+                </svg>
+              </a>
+            )}
+          </div>
           <p style={{ color: "var(--text-muted)", marginBottom: "16px" }}>
             {artist.songs.length} {artist.songs.length === 1 ? "song" : "songs"}
           </p>

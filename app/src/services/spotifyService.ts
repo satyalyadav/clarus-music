@@ -28,6 +28,9 @@ interface SpotifyArtist {
   id: string;
   name: string;
   images: SpotifyImage[];
+  external_urls?: {
+    spotify?: string;
+  };
 }
 
 interface SpotifySearchResponse {
@@ -141,22 +144,30 @@ class SpotifyService {
   /**
    * Get artist image URL (returns the largest available image)
    */
-  async getArtistImage(artistName: string): Promise<string | null> {
+  async getArtistInfo(
+    artistName: string
+  ): Promise<{ imageUrl: string | null; sourceUrl: string | null } | null> {
     try {
       const artist = await this.searchArtist(artistName);
       if (!artist || !artist.images || artist.images.length === 0) {
         return null;
       }
 
-      // Return the largest image (first in array is usually largest)
-      return artist.images[0].url;
+      return {
+        imageUrl: artist.images[0].url,
+        sourceUrl: artist.external_urls?.spotify || null,
+      };
     } catch (error) {
       console.error(`Error getting artist image for ${artistName}:`, error);
       return null;
     }
   }
+
+  async getArtistImage(artistName: string): Promise<string | null> {
+    const info = await this.getArtistInfo(artistName);
+    return info?.imageUrl || null;
+  }
 }
 
 // Export singleton instance
 export const spotifyService = new SpotifyService();
-

@@ -187,7 +187,7 @@ async function fetchArtistImageFromBandcamp(artistName) {
                 `Found artist image for ${artistName}: ${artistImage}`
               );
             }
-            return artistImage;
+            return { imageUrl: artistImage, sourceUrl: artistProfileUrl };
           } catch (e) {
             // Invalid URL, continue
           }
@@ -215,11 +215,13 @@ app.get("/api/bandcamp-artist-image", async (req, res) => {
 
     const artistImage = await fetchArtistImageFromBandcamp(artist.trim());
 
-    if (artistImage) {
-      return res.json({ imageUrl: artistImage });
-    } else {
-      return res.json({ imageUrl: null });
+    if (artistImage?.imageUrl) {
+      return res.json({
+        imageUrl: artistImage.imageUrl,
+        sourceUrl: artistImage.sourceUrl || null,
+      });
     }
+    return res.json({ imageUrl: null, sourceUrl: null });
   } catch (error) {
     console.error("Error in /api/bandcamp-artist-image:", error);
     return res.status(500).json({
@@ -778,10 +780,12 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
         const trackArtistImage = await fetchArtistImageFromBandcamp(
           metadata.artist
         );
-        if (trackArtistImage) {
-          metadata.artistImage = trackArtistImage;
+        if (trackArtistImage?.imageUrl) {
+          metadata.artistImage = trackArtistImage.imageUrl;
           if (process.env.NODE_ENV !== "production") {
-            console.log(`Found track artist image: ${trackArtistImage}`);
+            console.log(
+              `Found track artist image: ${trackArtistImage.imageUrl}`
+            );
           }
         } else {
           if (process.env.NODE_ENV !== "production") {
@@ -821,8 +825,8 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
         const trackArtistImage = await fetchArtistImageFromBandcamp(
           trackArtistFromTitle
         );
-        if (trackArtistImage) {
-          metadata.artistImage = trackArtistImage;
+        if (trackArtistImage?.imageUrl) {
+          metadata.artistImage = trackArtistImage.imageUrl;
         }
       }
     }

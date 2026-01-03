@@ -13,24 +13,37 @@ export const artistImageService = {
    */
   async fetchArtistImage(
     artistName: string,
-    bandcampArtistImage?: string
-  ): Promise<string | null> {
+    bandcampArtistImage?: string,
+    bandcampSourceUrl?: string
+  ): Promise<{
+    imageUrl: string;
+    sourceUrl: string | null;
+    sourceProvider: string;
+  } | null> {
     if (!artistName || artistName.trim().length === 0) {
       return null;
     }
 
     // If Bandcamp artist image is provided, use it first
     if (bandcampArtistImage && bandcampArtistImage.trim().length > 0) {
-      return bandcampArtistImage;
+      return {
+        imageUrl: bandcampArtistImage,
+        sourceUrl: bandcampSourceUrl || null,
+        sourceProvider: "bandcamp",
+      };
     }
 
     try {
       // Try Spotify as fallback
-      const spotifyImage = await spotifyService.getArtistImage(
+      const spotifyInfo = await spotifyService.getArtistInfo(
         artistName.trim()
       );
-      if (spotifyImage) {
-        return spotifyImage;
+      if (spotifyInfo?.imageUrl) {
+        return {
+          imageUrl: spotifyInfo.imageUrl,
+          sourceUrl: spotifyInfo.sourceUrl,
+          sourceProvider: "spotify",
+        };
       }
     } catch (error) {
       console.error(
@@ -50,16 +63,26 @@ export const artistImageService = {
   async fetchAndUpdateArtistImage(
     artistId: number,
     artistName: string,
-    bandcampArtistImage?: string
-  ): Promise<string | null> {
+    bandcampArtistImage?: string,
+    bandcampSourceUrl?: string
+  ): Promise<{
+    imageUrl: string;
+    sourceUrl: string | null;
+    sourceProvider: string;
+  } | null> {
     try {
-      const imageUrl = await this.fetchArtistImage(
+      const info = await this.fetchArtistImage(
         artistName,
-        bandcampArtistImage
+        bandcampArtistImage,
+        bandcampSourceUrl
       );
-      if (imageUrl) {
-        await artistService.update(artistId, { image_url: imageUrl });
-        return imageUrl;
+      if (info?.imageUrl) {
+        await artistService.update(artistId, {
+          image_url: info.imageUrl,
+          image_source_url: info.sourceUrl,
+          image_source_provider: info.sourceProvider,
+        });
+        return info;
       }
     } catch (error) {
       console.error(`Error updating artist image for ${artistName}:`, error);

@@ -28,6 +28,8 @@ export interface Artist {
   artist_id?: number;
   name: string;
   image_url?: string | null;
+  image_source_url?: string | null;
+  image_source_provider?: string | null;
   created_at?: number;
 }
 
@@ -95,6 +97,11 @@ class MusicLibraryDB extends Dexie {
     // Remove genre_id from songs in version 6
     db.version(6).stores({
       songs: "++song_id, title, artist_id, album_id, created_at",
+    });
+
+    // Add image source fields to artists in version 7
+    db.version(7).stores({
+      artists: "++artist_id, name, image_url, created_at",
     });
   }
 }
