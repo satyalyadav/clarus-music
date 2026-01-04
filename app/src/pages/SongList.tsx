@@ -9,6 +9,7 @@ import {
   SongWithRelations,
 } from "../services/db";
 import { formatDuration } from "../utils/formatDuration";
+import { shuffleArray } from "../utils/shuffleArray";
 
 const SongList: React.FC = () => {
   const [songs, setSongs] = useState<SongWithRelations[]>([]);
@@ -59,38 +60,17 @@ const SongList: React.FC = () => {
     };
   }, []);
 
-  const handlePlayAll = async () => {
-    if (songs.length === 0) return;
-    try {
-      const tracks = await Promise.all(
-        songs.map(async (s) => {
-          try {
-            const url = s.song_id ? songUrls.get(s.song_id) : null;
-            if (!url && s.song_id) {
-              // Create URL if not already created
-              const newUrl = await getSongUrl(s);
-              setSongUrls((prev) => new Map(prev).set(s.song_id!, newUrl));
-              return {
-                url: newUrl,
-                title: s.title,
-                artist: s.artist_name || "",
-                album: s.album_title || "",
-                cover: s.cover_image || "",
-                songId: s.song_id,
-              };
-            }
+  const buildTracks = async () => {
+    const tracks = await Promise.all(
+      songs.map(async (s) => {
+        try {
+          const url = s.song_id ? songUrls.get(s.song_id) : null;
+          if (!url && s.song_id) {
+            // Create URL if not already created
+            const newUrl = await getSongUrl(s);
+            setSongUrls((prev) => new Map(prev).set(s.song_id!, newUrl));
             return {
-              url: url || "",
-              title: s.title,
-              artist: s.artist_name || "",
-              album: s.album_title || "",
-              cover: s.cover_image || "",
-              songId: s.song_id,
-            };
-          } catch (err) {
-            console.error(`Failed to get URL for song ${s.song_id}:`, err);
-            return {
-              url: "",
+              url: newUrl,
               title: s.title,
               artist: s.artist_name || "",
               album: s.album_title || "",
@@ -98,10 +78,34 @@ const SongList: React.FC = () => {
               songId: s.song_id,
             };
           }
-        })
-      );
-      // Filter out tracks with no URL
-      const validTracks = tracks.filter((t) => t.url);
+          return {
+            url: url || "",
+            title: s.title,
+            artist: s.artist_name || "",
+            album: s.album_title || "",
+            cover: s.cover_image || "",
+            songId: s.song_id,
+          };
+        } catch (err) {
+          console.error(`Failed to get URL for song ${s.song_id}:`, err);
+          return {
+            url: "",
+            title: s.title,
+            artist: s.artist_name || "",
+            album: s.album_title || "",
+            cover: s.cover_image || "",
+            songId: s.song_id,
+          };
+        }
+      })
+    );
+    return tracks.filter((t) => t.url);
+  };
+
+  const handlePlayAll = async () => {
+    if (songs.length === 0) return;
+    try {
+      const validTracks = await buildTracks();
       if (validTracks.length === 0) {
         alert("No playable songs found");
         return;
@@ -112,6 +116,27 @@ const SongList: React.FC = () => {
       console.error("Error playing all songs:", err);
       alert(
         `Failed to play songs: ${
+          err instanceof Error ? err.message : "Unknown error"
+        }`
+      );
+    }
+  };
+
+  const handleShuffleAll = async () => {
+    if (songs.length === 0) return;
+    try {
+      const validTracks = await buildTracks();
+      if (validTracks.length === 0) {
+        alert("No playable songs found");
+        return;
+      }
+      const shuffledTracks = shuffleArray(validTracks);
+      setQueue(shuffledTracks);
+      if (shuffledTracks[0]) playTrack(shuffledTracks[0], 0);
+    } catch (err) {
+      console.error("Error shuffling songs:", err);
+      alert(
+        `Failed to shuffle songs: ${
           err instanceof Error ? err.message : "Unknown error"
         }`
       );
@@ -342,6 +367,13 @@ const SongList: React.FC = () => {
           disabled={songs.length === 0 || selectionMode}
         >
           ▶ play all
+        </button>
+        <button
+          className="btn"
+          onClick={handleShuffleAll}
+          disabled={songs.length === 0 || selectionMode}
+        >
+          shuffle
         </button>
         <button
           className="btn"

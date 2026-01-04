@@ -10,6 +10,7 @@ import {
   SongWithRelations,
 } from "../services/db";
 import { formatDuration } from "../utils/formatDuration";
+import { shuffleArray } from "../utils/shuffleArray";
 
 interface Album {
   album_id?: number;
@@ -88,9 +89,9 @@ const AlbumDetail: React.FC = () => {
     loadData();
   }, [id]);
 
-  const handlePlayAll = async () => {
-    if (!album || album.songs.length === 0) return;
-    const tracks = await Promise.all(
+  const buildTracks = async () => {
+    if (!album) return [];
+    return Promise.all(
       album.songs.map(async (s) => {
         const url = await getSongUrl(s);
         return {
@@ -103,25 +104,26 @@ const AlbumDetail: React.FC = () => {
         };
       })
     );
+  };
+
+  const handlePlayAll = async () => {
+    if (!album || album.songs.length === 0) return;
+    const tracks = await buildTracks();
     setQueue(tracks);
     if (tracks[0]) playTrack(tracks[0], 0);
   };
 
+  const handleShuffleAll = async () => {
+    if (!album || album.songs.length === 0) return;
+    const tracks = await buildTracks();
+    const shuffledTracks = shuffleArray(tracks);
+    setQueue(shuffledTracks);
+    if (shuffledTracks[0]) playTrack(shuffledTracks[0], 0);
+  };
+
   const handlePlaySong = async (song: SongWithRelations) => {
     if (!album) return;
-    const tracks = await Promise.all(
-      album.songs.map(async (s) => {
-        const url = await getSongUrl(s);
-        return {
-          url,
-          title: s.title,
-          artist: s.artist_name || "",
-          album: album.title,
-          cover: s.cover_image || album.cover_image || "",
-          songId: s.song_id,
-        };
-      })
-    );
+    const tracks = await buildTracks();
     setQueue(tracks);
     
     // Find the index of the song being played in the queue
@@ -190,13 +192,22 @@ const AlbumDetail: React.FC = () => {
           <p style={{ color: "var(--text-muted)", marginBottom: "16px" }}>
             {album.songs.length} {album.songs.length === 1 ? "song" : "songs"}
           </p>
-          <button
-            className="btn btn-primary"
-            onClick={handlePlayAll}
-            disabled={album.songs.length === 0}
-          >
-            ▶ play album
-          </button>
+          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+            <button
+              className="btn btn-primary"
+              onClick={handlePlayAll}
+              disabled={album.songs.length === 0}
+            >
+              ▶ play album
+            </button>
+            <button
+              className="btn"
+              onClick={handleShuffleAll}
+              disabled={album.songs.length === 0}
+            >
+              shuffle
+            </button>
+          </div>
         </div>
       </div>
 

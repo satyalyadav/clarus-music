@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { albumService, songService, artistService, songArtistService, default as db } from "../services/db";
+import { albumService, songService, artistService } from "../services/db";
 
 interface Album {
   album_id?: number;
@@ -59,27 +59,8 @@ const AlbumList: React.FC = () => {
         const artistMap = new Map(artistsData.map((a) => [a.artist_id, a.name]));
         const albumCoverMap = new Map<number, string>();
         
-        // Create a map of album_id to unique artist IDs from songs
+        // Create a map of album_id to unique primary artist IDs from songs
         const albumArtistIdsMap = new Map<number, Set<number>>();
-        
-        // Get all song-artist relationships at once (more efficient)
-        const allSongIds = songsData
-          .map((s) => s.song_id)
-          .filter((id): id is number => id !== undefined);
-        
-        // Fetch all song-artist relationships in one query
-        const allSongArtists = allSongIds.length > 0
-          ? await db.songArtists.where("song_id").anyOf(allSongIds).toArray()
-          : [];
-        
-        // Create a map of song_id to artist_ids
-        const songToArtistIdsMap = new Map<number, number[]>();
-        for (const sa of allSongArtists) {
-          if (!songToArtistIdsMap.has(sa.song_id)) {
-            songToArtistIdsMap.set(sa.song_id, []);
-          }
-          songToArtistIdsMap.get(sa.song_id)!.push(sa.artist_id);
-        }
         
         for (const song of songsData) {
           if (song.album_id) {
@@ -97,12 +78,6 @@ const AlbumList: React.FC = () => {
             // Add primary artist
             if (song.artist_id) {
               artistIds.add(song.artist_id);
-            }
-            
-            // Add artists from songArtists join table
-            if (song.song_id) {
-              const extraArtistIds = songToArtistIdsMap.get(song.song_id) || [];
-              extraArtistIds.forEach((id) => artistIds.add(id));
             }
           }
         }
@@ -137,10 +112,13 @@ const AlbumList: React.FC = () => {
               song.bandcamp_page_url.includes("/track/") // Track page, not album page
             );
             const albumArtistName = album.artist_id
-              ? artistMap.get(album.artist_id)
+              ? artistMap.get(album.artist_id) ?? null
               : null;
             const hasBandcampHostMismatch = albumSongs.some((song) =>
-              isBandcampHostMismatch(albumArtistName, song.bandcamp_page_url)
+              isBandcampHostMismatch(
+                albumArtistName,
+                song.bandcamp_page_url ?? null
+              )
             );
             const isLikelyCompilationFromBandcamp = 
               hasBandcampTrackSongs && 
