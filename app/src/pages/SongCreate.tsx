@@ -31,6 +31,7 @@ interface AlbumResult {
   album: string;
   artist: string;
   artistImage?: string;
+  artistImageSourceUrl?: string;
   coverArt: string;
   tracks: AlbumTrack[];
   pageUrl: string;
@@ -920,7 +921,11 @@ const SongCreate = (): React.ReactElement => {
         } else if (bandcampArtistImage && isBandcampResult) {
           // Fallback: if no Spotify IDs, still use Bandcamp image when available
           try {
-            const sourceUrl = bandcampMetadata?.pageUrl || bandcampUrl || null;
+            const sourceUrl =
+              bandcampMetadata?.artistImageSourceUrl ||
+              bandcampMetadata?.pageUrl ||
+              bandcampUrl ||
+              null;
             await artistService.update(primaryArtistId, {
               image_url: bandcampArtistImage,
               image_source_url: sourceUrl,
@@ -1291,7 +1296,8 @@ const SongCreate = (): React.ReactElement => {
           } else if (albumResult.artistImage) {
             // Update artist image if Bandcamp provided one
             try {
-              const sourceUrl = albumResult.pageUrl || null;
+              const sourceUrl =
+                albumResult.artistImageSourceUrl || albumResult.pageUrl || null;
               await artistService.update(primaryAlbumArtist.artist_id, {
                 image_url: albumResult.artistImage,
                 image_source_url: sourceUrl,
@@ -1412,6 +1418,49 @@ const SongCreate = (): React.ReactElement => {
                 err
               );
               // Continue without image - Spotify fallback will handle it later
+            }
+          } else if (!artist.image_source_url) {
+            try {
+              const response = await fetch(
+                `/api/bandcamp-artist-image?artist=${encodeURIComponent(
+                  artistName
+                )}`
+              );
+              if (response.ok) {
+                const data = await response.json();
+                if (data.sourceUrl || data.imageUrl) {
+                  const sourceUrl = data.sourceUrl || null;
+                  const imageUrl = data.imageUrl || artist.image_url || null;
+                  await artistService.update(artist.artist_id!, {
+                    image_url: imageUrl,
+                    image_source_url: sourceUrl,
+                    image_source_provider: sourceUrl ? "bandcamp" : null,
+                  });
+                  artist = {
+                    ...artist,
+                    image_url: imageUrl,
+                    image_source_url: sourceUrl,
+                    image_source_provider: sourceUrl ? "bandcamp" : null,
+                  };
+                  setArtists((prev) =>
+                    prev.map((a) =>
+                      a.artist_id === artist?.artist_id
+                        ? {
+                            ...a,
+                            image_url: imageUrl,
+                            image_source_url: sourceUrl,
+                            image_source_provider: sourceUrl ? "bandcamp" : null,
+                          }
+                        : a
+                    )
+                  );
+                }
+              }
+            } catch (err) {
+              console.error(
+                `Error backfilling Bandcamp source for ${artistName}:`,
+                err
+              );
             }
           }
 

@@ -782,6 +782,7 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
         );
         if (trackArtistImage?.imageUrl) {
           metadata.artistImage = trackArtistImage.imageUrl;
+          metadata.artistImageSourceUrl = trackArtistImage.sourceUrl || null;
           if (process.env.NODE_ENV !== "production") {
             console.log(
               `Found track artist image: ${trackArtistImage.imageUrl}`
@@ -827,6 +828,7 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
         );
         if (trackArtistImage?.imageUrl) {
           metadata.artistImage = trackArtistImage.imageUrl;
+          metadata.artistImageSourceUrl = trackArtistImage.sourceUrl || null;
         }
       }
     }
@@ -909,6 +911,9 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
         /_\d+\.(jpg|png)$/,
         "_0.$1"
       );
+      if (!metadata.artistImageSourceUrl) {
+        metadata.artistImageSourceUrl = url;
+      }
     }
 
     // Extract album name if it's a track page
@@ -1050,6 +1055,7 @@ app.get("/api/bandcamp-metadata", async (req, res) => {
           "",
         artist: metadata.artist || (tralbumData && tralbumData.artist) || "",
         artistImage: metadata.artistImage || "",
+        artistImageSourceUrl: metadata.artistImageSourceUrl || null,
         coverArt: metadata.coverArt || "",
         tracks: allTracks,
         pageUrl: url,

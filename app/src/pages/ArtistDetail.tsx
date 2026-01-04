@@ -108,6 +108,45 @@ const ArtistDetail: React.FC = () => {
               .catch((err) => {
                 console.error("Error fetching artist image:", err);
               });
+          } else if (
+            artistData.artist_id &&
+            artistData.name &&
+            artistData.image_url &&
+            !artistData.image_source_url &&
+            (artistData.image_url.includes("bcbits.com") ||
+              artistData.image_url.includes("bandcamp.com"))
+          ) {
+            try {
+              const response = await fetch(
+                `/api/bandcamp-artist-image?artist=${encodeURIComponent(
+                  artistData.name
+                )}`
+              );
+              if (response.ok) {
+                const data = await response.json();
+                if (data.sourceUrl || data.imageUrl) {
+                  const sourceUrl = data.sourceUrl || null;
+                  const imageUrl = data.imageUrl || artistData.image_url;
+                  await artistService.update(artistData.artist_id, {
+                    image_url: imageUrl,
+                    image_source_url: sourceUrl,
+                    image_source_provider: sourceUrl ? "bandcamp" : null,
+                  });
+                  setArtist((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          image_url: imageUrl,
+                          image_source_url: sourceUrl,
+                          image_source_provider: sourceUrl ? "bandcamp" : null,
+                        }
+                      : null
+                  );
+                }
+              }
+            } catch (err) {
+              console.error("Error backfilling Bandcamp source:", err);
+            }
           }
         }
         setError(null);
