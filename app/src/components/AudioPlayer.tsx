@@ -20,6 +20,9 @@ const AudioPlayer: React.FC = () => {
     setVolume,
     playNext,
     playPrevious,
+    playTrack,
+    queue,
+    setQueue,
   } = useAudioPlayer();
 
   const sliderRef = useRef<HTMLDivElement>(null);
@@ -36,6 +39,9 @@ const AudioPlayer: React.FC = () => {
   const [dragTime, setDragTime] = useState<number | null>(null);
   const dragTimeRef = useRef<number | null>(null);
   const hasMovedRef = useRef(false);
+  const [showQueue, setShowQueue] = useState(false);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   const toggleMute = () => {
     if (volume > 0) {
@@ -194,6 +200,141 @@ const AudioPlayer: React.FC = () => {
     return () => window.removeEventListener('resize', checkSubtitleOverflow);
   }, [currentTrack?.artist, currentTrack?.album]);
 
+  const toggleQueue = () => {
+    setShowQueue((prev) => !prev);
+  };
+
+  const moveQueueItem = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      if (fromIndex === toIndex) return;
+      setQueue((prev) => {
+        if (
+          fromIndex < 0 ||
+          toIndex < 0 ||
+          fromIndex >= prev.length ||
+          toIndex >= prev.length
+        ) {
+          return prev;
+        }
+        const next = [...prev];
+        const [moved] = next.splice(fromIndex, 1);
+        next.splice(toIndex, 0, moved);
+        return next;
+      });
+    },
+    [setQueue]
+  );
+
+  const handleQueueDragStart = (
+    e: React.DragEvent<HTMLDivElement>,
+    index: number
+  ) => {
+    setDragIndex(index);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", index.toString());
+  };
+
+  const handleQueueDragOver = (
+    e: React.DragEvent<HTMLDivElement>,
+    index: number
+  ) => {
+    e.preventDefault();
+    setDragOverIndex(index);
+  };
+
+  const handleQueueDrop = (
+    e: React.DragEvent<HTMLDivElement>,
+    index: number
+  ) => {
+    e.preventDefault();
+    const fromIndex =
+      dragIndex !== null
+        ? dragIndex
+        : Number.parseInt(e.dataTransfer.getData("text/plain"), 10);
+    if (!Number.isNaN(fromIndex)) {
+      moveQueueItem(fromIndex, index);
+    }
+    setDragIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleQueueDragEnd = () => {
+    setDragIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleQueueItemClick = (index: number) => {
+    if (dragIndex !== null) return;
+    const track = queue[index];
+    if (!track) return;
+    const matchesCurrent =
+      (track.songId !== undefined && track.songId === currentTrack?.songId) ||
+      track.url === currentTrack?.url;
+    if (!matchesCurrent) {
+      playTrack(track, index);
+    }
+  };
+
+  const queuePanel = showQueue ? (
+    <div className="queue-panel">
+      <div className="queue-panel-header">
+        <span>Queue ({queue.length})</span>
+        <button
+          className="btn btn-icon queue-close"
+          onClick={toggleQueue}
+          aria-label="Close queue"
+          title="Close queue"
+        >
+          <span className="btn-icon-content">x</span>
+        </button>
+      </div>
+      {queue.length === 0 ? (
+        <div className="queue-empty">Queue is empty.</div>
+      ) : (
+        <div className="queue-list">
+          {queue.map((track, index) => {
+            const isCurrent =
+              (track.songId !== undefined &&
+                track.songId === currentTrack?.songId) ||
+              track.url === currentTrack?.url;
+            const isDragging = dragIndex === index;
+            const isDragOver = dragOverIndex === index;
+            return (
+              <div
+                key={`${track.songId ?? track.url}-${index}`}
+                className={`queue-item${isDragging ? " dragging" : ""}${
+                  isDragOver ? " drag-over" : ""
+                }`}
+                draggable
+                onDragStart={(e) => handleQueueDragStart(e, index)}
+                onDragOver={(e) => handleQueueDragOver(e, index)}
+                onDrop={(e) => handleQueueDrop(e, index)}
+                onDragEnd={handleQueueDragEnd}
+                onClick={() => handleQueueItemClick(index)}
+              >
+                <span className="queue-item-index">{index + 1}</span>
+                <div className="queue-item-info">
+                  <div
+                    className={`queue-item-title ${isCurrent ? "playing" : ""}`}
+                  >
+                    {track.title || "Unknown"}
+                  </div>
+                  <div className="queue-item-subtitle">
+                    {track.artist || "Unknown Artist"}
+                    {track.album ? ` • ${track.album}` : ""}
+                  </div>
+                </div>
+                <span className="queue-drag-handle" aria-hidden="true">
+                  :::
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  ) : null;
+
   if (!currentTrack) {
     return (
       <div className="audio-player">
@@ -205,6 +346,31 @@ const AudioPlayer: React.FC = () => {
             No track selected
           </div>
         </div>
+        <div style={{ flex: 1 }} />
+        <div className="audio-player-volume">
+          <button
+            className="btn btn-icon queue-toggle"
+            onClick={toggleQueue}
+            aria-label="Open queue"
+            aria-pressed={showQueue}
+            title="Queue"
+          >
+            <svg
+              className="queue-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M4 6h16" />
+              <path d="M4 12h16" />
+              <path d="M4 18h12" />
+            </svg>
+          </button>
+        </div>
+        {queuePanel}
       </div>
     );
   }
@@ -355,7 +521,29 @@ const AudioPlayer: React.FC = () => {
             { "--volume-percent": `${volume * 100}%` } as React.CSSProperties
           }
         />
+        <button
+          className="btn btn-icon queue-toggle"
+          onClick={toggleQueue}
+          aria-label="Open queue"
+          aria-pressed={showQueue}
+          title="Queue"
+        >
+          <svg
+            className="queue-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M4 6h16" />
+            <path d="M4 12h16" />
+            <path d="M4 18h12" />
+          </svg>
+        </button>
       </div>
+      {queuePanel}
     </div>
   );
 };

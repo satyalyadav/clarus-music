@@ -12,8 +12,14 @@ const SearchResults: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [songUrls, setSongUrls] = useState<Map<number, string>>(new Map());
   const navigate = useNavigate();
-  const { playTrack, currentTrack, isPlaying, setQueue, togglePlayPause } =
-    useAudioPlayer();
+  const {
+    playTrack,
+    currentTrack,
+    isPlaying,
+    setQueue,
+    togglePlayPause,
+    addToQueue,
+  } = useAudioPlayer();
 
   useEffect(() => {
     const performSearch = async () => {
@@ -199,6 +205,39 @@ const SearchResults: React.FC = () => {
     }
   };
 
+  const handleAddToQueue = async (song: SongWithRelations) => {
+    try {
+      const songUrl = song.song_id ? songUrls.get(song.song_id) : null;
+      let finalUrl = songUrl;
+
+      if (!songUrl && song.song_id) {
+        finalUrl = await getSongUrl(song);
+        setSongUrls(prev => new Map(prev).set(song.song_id!, finalUrl));
+      }
+
+      if (!finalUrl) {
+        alert("Cannot queue song: Song file not available");
+        return;
+      }
+
+      addToQueue({
+        url: finalUrl,
+        title: song.title,
+        artist: song.artist_name || "",
+        album: song.album_title || "",
+        cover: song.cover_image || "",
+        songId: song.song_id,
+      });
+    } catch (err) {
+      console.error("Error adding song to queue:", err);
+      alert(
+        `Failed to add to queue: ${
+          err instanceof Error ? err.message : "Unknown error"
+        }`
+      );
+    }
+  };
+
   const getResultIcon = (type: SearchResult['type']) => {
     switch (type) {
       case 'song':
@@ -287,6 +326,12 @@ const SearchResults: React.FC = () => {
                     <div className="list-item-actions" onClick={(e) => e.stopPropagation()}>
                       <button
                         className="btn btn-small"
+                        onClick={() => handleAddToQueue(song)}
+                      >
+                        queue
+                      </button>
+                      <button
+                        className="btn btn-small"
                         onClick={() => navigate(`/songs/${song.song_id}/edit`)}
                       >
                         edit
@@ -362,4 +407,3 @@ const SearchResults: React.FC = () => {
 };
 
 export default SearchResults;
-

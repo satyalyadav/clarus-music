@@ -1,32 +1,34 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { 
-  playlistService, 
-  songService, 
-  getSongsWithRelations 
+import { useAudioPlayer } from "../hooks/useAudioPlayer";
+import {
+  playlistService,
+  getSongsWithRelations,
+  getSongUrl,
+  Song,
 } from "../services/db";
 
-interface Song {
-  song_id?: number;
-  title: string;
+interface SongItem extends Song {
   artist_name?: string;
+  album_title?: string;
 }
 
 interface Playlist {
   playlist_id?: number;
   title: string;
-  songs: Song[];
+  songs: SongItem[];
 }
 
 const PlaylistEdit: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [title, setTitle] = useState("");
-  const [playlistSongs, setPlaylistSongs] = useState<Song[]>([]);
-  const [allSongs, setAllSongs] = useState<Song[]>([]);
+  const [playlistSongs, setPlaylistSongs] = useState<SongItem[]>([]);
+  const [allSongs, setAllSongs] = useState<SongItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
+  const { addToQueue } = useAudioPlayer();
 
   useEffect(() => {
     const loadData = async () => {
@@ -91,6 +93,27 @@ const PlaylistEdit: React.FC = () => {
     }
   };
 
+  const handleAddToQueue = async (song: SongItem) => {
+    try {
+      const songUrl = await getSongUrl(song);
+      addToQueue({
+        url: songUrl,
+        title: song.title,
+        artist: song.artist_name || "",
+        album: song.album_title || "",
+        cover: song.cover_image || "",
+        songId: song.song_id,
+      });
+    } catch (err) {
+      console.error("Error adding song to queue:", err);
+      alert(
+        `Failed to add to queue: ${
+          err instanceof Error ? err.message : "Unknown error"
+        }`
+      );
+    }
+  };
+
   const playlistSongIds = new Set(playlistSongs.map((s) => s.song_id).filter((id): id is number => id !== undefined));
   const availableSongs = allSongs.filter(
     (s) => s.song_id && !playlistSongIds.has(s.song_id)
@@ -152,12 +175,20 @@ const PlaylistEdit: React.FC = () => {
                       {song.artist_name || "Unknown Artist"}
                     </div>
                   </div>
-                  <button
-                    className="btn btn-small btn-danger"
-                    onClick={() => handleRemoveSong(song.song_id)}
-                  >
-                    remove
-                  </button>
+                  <div className="list-item-actions">
+                    <button
+                      className="btn btn-small"
+                      onClick={() => handleAddToQueue(song)}
+                    >
+                      queue
+                    </button>
+                    <button
+                      className="btn btn-small btn-danger"
+                      onClick={() => handleRemoveSong(song.song_id)}
+                    >
+                      remove
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -180,13 +211,21 @@ const PlaylistEdit: React.FC = () => {
                       {song.artist_name || "Unknown Artist"}
                     </div>
                   </div>
-                  <button
-                    className="btn btn-small btn-primary"
-                    onClick={() => handleAddSong(song.song_id)}
-                    disabled={adding}
-                  >
-                    add
-                  </button>
+                  <div className="list-item-actions">
+                    <button
+                      className="btn btn-small"
+                      onClick={() => handleAddToQueue(song)}
+                    >
+                      queue
+                    </button>
+                    <button
+                      className="btn btn-small btn-primary"
+                      onClick={() => handleAddSong(song.song_id)}
+                      disabled={adding}
+                    >
+                      add
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

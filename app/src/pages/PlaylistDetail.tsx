@@ -26,8 +26,14 @@ const PlaylistDetail: React.FC = () => {
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { playTrack, currentTrack, isPlaying, setQueue, togglePlayPause } =
-    useAudioPlayer();
+  const {
+    playTrack,
+    currentTrack,
+    isPlaying,
+    setQueue,
+    togglePlayPause,
+    addToQueue,
+  } = useAudioPlayer();
 
   const fetchPlaylist = async () => {
     if (!id) return;
@@ -144,6 +150,27 @@ const PlaylistDetail: React.FC = () => {
         cover: song.cover_image || "",
         songId: song.song_id,
       });
+    }
+  };
+
+  const handleAddToQueue = async (song: SongWithRelations) => {
+    try {
+      const songUrl = await getSongUrl(song);
+      addToQueue({
+        url: songUrl,
+        title: song.title,
+        artist: song.artist_name || "",
+        album: song.album_title || "",
+        cover: song.cover_image || "",
+        songId: song.song_id,
+      });
+    } catch (err) {
+      console.error("Error adding song to queue:", err);
+      alert(
+        `Failed to add to queue: ${
+          err instanceof Error ? err.message : "Unknown error"
+        }`
+      );
     }
   };
 
@@ -286,21 +313,28 @@ const PlaylistDetail: React.FC = () => {
                   style={{
                     color: "var(--text-muted)",
                     fontSize: "12px",
-                    marginRight: "12px",
                   }}
                 >
                   {formatDuration(song.duration)}
                 </span>
-                <button
-                  className="btn btn-small btn-danger"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleRemoveSong(song.song_id);
-                  }}
-                  title="Remove from playlist"
+                <div
+                  className="list-item-actions"
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  ×
-                </button>
+                  <button
+                    className="btn btn-small"
+                    onClick={() => handleAddToQueue(song)}
+                  >
+                    queue
+                  </button>
+                  <button
+                    className="btn btn-small btn-danger"
+                    onClick={() => handleRemoveSong(song.song_id)}
+                    title="Remove from playlist"
+                  >
+                    x
+                  </button>
+                </div>
               </div>
             );
           })}

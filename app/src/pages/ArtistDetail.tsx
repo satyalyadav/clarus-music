@@ -28,7 +28,14 @@ const ArtistDetail: React.FC = () => {
   const [artist, setArtist] = useState<Artist | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { playTrack, currentTrack, isPlaying, setQueue, togglePlayPause } = useAudioPlayer();
+  const {
+    playTrack,
+    currentTrack,
+    isPlaying,
+    setQueue,
+    togglePlayPause,
+    addToQueue,
+  } = useAudioPlayer();
 
   useEffect(() => {
     const loadData = async () => {
@@ -216,6 +223,28 @@ const ArtistDetail: React.FC = () => {
     }
   };
 
+  const handleAddToQueue = async (song: SongWithRelations) => {
+    if (!artist) return;
+    try {
+      const songUrl = await getSongUrl(song);
+      addToQueue({
+        url: songUrl,
+        title: song.title,
+        artist: song.artist_name || artist.name,
+        album: song.album_title || "",
+        cover: song.cover_image || song.album_cover_image || "",
+        songId: song.song_id,
+      });
+    } catch (err) {
+      console.error("Error adding song to queue:", err);
+      alert(
+        `Failed to add to queue: ${
+          err instanceof Error ? err.message : "Unknown error"
+        }`
+      );
+    }
+  };
+
   if (loading) return <div className="loading">Loading artist...</div>;
   if (error) return <div className="error">Error: {error}</div>;
   if (!artist) return <div className="error">Artist not found</div>;
@@ -379,6 +408,17 @@ const ArtistDetail: React.FC = () => {
                 <span style={{ color: "var(--text-muted)", fontSize: "12px" }}>
                   {formatDuration(song.duration)}
                 </span>
+                <div
+                  className="list-item-actions"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    className="btn btn-small"
+                    onClick={() => handleAddToQueue(song)}
+                  >
+                    queue
+                  </button>
+                </div>
               </div>
             );
           })}

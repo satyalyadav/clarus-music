@@ -781,6 +781,122 @@ body {
   width: 180px;
 }
 
+.queue-toggle {
+  border-radius: 8px;
+}
+
+.queue-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--text-secondary);
+}
+
+.queue-toggle:hover .queue-icon {
+  color: var(--text-primary);
+}
+
+.queue-panel {
+  position: absolute;
+  right: 20px;
+  bottom: calc(100% + 12px);
+  width: min(360px, 90vw);
+  max-height: 360px;
+  display: flex;
+  flex-direction: column;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  z-index: 60;
+}
+
+.queue-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.queue-close {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+
+.queue-empty {
+  padding: 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.queue-list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.queue-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+  cursor: grab;
+}
+
+.queue-item:last-child {
+  border-bottom: none;
+}
+
+.queue-item.dragging {
+  opacity: 0.5;
+  cursor: grabbing;
+}
+
+.queue-item.drag-over {
+  background: var(--button-hover);
+}
+
+.queue-item-index {
+  width: 18px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.queue-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.queue-item-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-item-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-drag-handle {
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
 .volume-btn {
   background: none;
   border: none;
@@ -971,5 +1087,11 @@ body {
   .audio-player-main {
     flex-basis: 100%;
     order: 1;
+  }
+
+  .queue-panel {
+    right: 16px;
+    left: 16px;
+    width: auto;
   }
 }

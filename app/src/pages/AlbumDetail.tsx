@@ -25,8 +25,14 @@ const AlbumDetail: React.FC = () => {
   const [album, setAlbum] = useState<Album | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { playTrack, currentTrack, isPlaying, setQueue, togglePlayPause } =
-    useAudioPlayer();
+  const {
+    playTrack,
+    currentTrack,
+    isPlaying,
+    setQueue,
+    togglePlayPause,
+    addToQueue,
+  } = useAudioPlayer();
 
   useEffect(() => {
     const loadData = async () => {
@@ -145,6 +151,28 @@ const AlbumDetail: React.FC = () => {
     }
   };
 
+  const handleAddToQueue = async (song: SongWithRelations) => {
+    if (!album) return;
+    try {
+      const songUrl = await getSongUrl(song);
+      addToQueue({
+        url: songUrl,
+        title: song.title,
+        artist: song.artist_name || "",
+        album: album.title,
+        cover: song.cover_image || album.cover_image || "",
+        songId: song.song_id,
+      });
+    } catch (err) {
+      console.error("Error adding song to queue:", err);
+      alert(
+        `Failed to add to queue: ${
+          err instanceof Error ? err.message : "Unknown error"
+        }`
+      );
+    }
+  };
+
   if (loading) return <div className="loading">Loading album...</div>;
   if (error) return <div className="error">Error: {error}</div>;
   if (!album) return <div className="error">Album not found</div>;
@@ -250,6 +278,17 @@ const AlbumDetail: React.FC = () => {
                 <span style={{ color: "var(--text-muted)", fontSize: "12px" }}>
                   {formatDuration(song.duration)}
                 </span>
+                <div
+                  className="list-item-actions"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    className="btn btn-small"
+                    onClick={() => handleAddToQueue(song)}
+                  >
+                    queue
+                  </button>
+                </div>
               </div>
             );
           })}

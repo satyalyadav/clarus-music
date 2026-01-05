@@ -20,8 +20,14 @@ const SongList: React.FC = () => {
   const [selectionMode, setSelectionMode] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
-  const { playTrack, currentTrack, setQueue, togglePlayPause, stop } =
-    useAudioPlayer();
+  const {
+    playTrack,
+    currentTrack,
+    setQueue,
+    togglePlayPause,
+    stop,
+    addToQueue,
+  } = useAudioPlayer();
 
   useEffect(() => {
     const loadSongs = async () => {
@@ -345,6 +351,40 @@ const SongList: React.FC = () => {
     }
   };
 
+  const handleAddToQueue = async (song: SongWithRelations) => {
+    try {
+      const songUrl = song.song_id ? songUrls.get(song.song_id) : null;
+      let finalUrl = songUrl;
+
+      if (!songUrl && song.song_id) {
+        const newUrl = await getSongUrl(song);
+        finalUrl = newUrl;
+        setSongUrls((prev) => new Map(prev).set(song.song_id!, newUrl));
+      }
+
+      if (!finalUrl) {
+        alert("Cannot queue song: Song file not available");
+        return;
+      }
+
+      addToQueue({
+        url: finalUrl,
+        title: song.title,
+        artist: song.artist_name || "",
+        album: song.album_title || "",
+        cover: song.cover_image || "",
+        songId: song.song_id,
+      });
+    } catch (err) {
+      console.error("Error adding song to queue:", err);
+      alert(
+        `Failed to add to queue: ${
+          err instanceof Error ? err.message : "Unknown error"
+        }`
+      );
+    }
+  };
+
   if (loading) return <div className="loading">Loading songs...</div>;
   if (error) return <div className="error">Error: {error}</div>;
 
@@ -507,6 +547,12 @@ const SongList: React.FC = () => {
                     className="list-item-actions"
                     onClick={(e) => e.stopPropagation()}
                   >
+                    <button
+                      className="btn btn-small"
+                      onClick={() => handleAddToQueue(song)}
+                    >
+                      queue
+                    </button>
                     <button
                       className="btn btn-small"
                       onClick={() => navigate(`/songs/${song.song_id}/edit`)}
