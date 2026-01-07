@@ -206,9 +206,11 @@ const AudioPlayer: React.FC = () => {
     setShowQueue((prev) => !prev);
   };
 
-  // Auto-scroll to current track when queue opens
+  // Auto-scroll to current track only when queue opens (not on track changes)
+  const prevShowQueueRef = useRef(false);
   useEffect(() => {
-    if (showQueue && currentTrackRef.current && queueListRef.current) {
+    // Only scroll when queue first opens, not when tracks change
+    if (showQueue && !prevShowQueueRef.current && currentTrackRef.current && queueListRef.current) {
       // Small delay to ensure the DOM has updated
       setTimeout(() => {
         currentTrackRef.current?.scrollIntoView({
@@ -217,7 +219,8 @@ const AudioPlayer: React.FC = () => {
         });
       }, 100);
     }
-  }, [showQueue, currentTrack?.songId, currentTrack?.url]);
+    prevShowQueueRef.current = showQueue;
+  }, [showQueue]);
 
   const moveQueueItem = useCallback(
     (fromIndex: number, toIndex: number) => {
@@ -291,7 +294,7 @@ const AudioPlayer: React.FC = () => {
   };
 
   const queuePanel = showQueue ? (
-    <div className="queue-panel" key={`queue-${queue.length}-${currentTrack?.songId ?? currentTrack?.url ?? 'none'}`}>
+    <div className="queue-panel" key={`queue-${queue.length}`}>
       <div className="queue-panel-header">
         <span>Queue ({queue.length})</span>
         <button
