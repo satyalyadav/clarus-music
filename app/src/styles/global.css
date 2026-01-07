@@ -847,10 +847,21 @@ body {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border-color);
   cursor: grab;
+  transition: background-color 0.2s ease;
 }
 
 .queue-item:last-child {
   border-bottom: none;
+}
+
+.queue-item:hover:not(.dragging) {
+  background: var(--button-hover);
+}
+
+.queue-item.current {
+  background: var(--button-hover);
+  border-left: 3px solid var(--playing-color);
+  padding-left: 9px;
 }
 
 .queue-item.dragging {
@@ -867,6 +878,25 @@ body {
   font-size: 11px;
   color: var(--text-muted);
   text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.queue-item-playing-indicator {
+  color: var(--playing-color);
+  font-size: 10px;
+  font-weight: bold;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
 }
 
 .queue-item-info {
@@ -881,6 +911,10 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.queue-item.current .queue-item-title.playing {
+  font-weight: 600;
 }
 
 .queue-item-subtitle {

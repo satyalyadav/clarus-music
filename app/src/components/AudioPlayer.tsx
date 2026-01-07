@@ -42,6 +42,8 @@ const AudioPlayer: React.FC = () => {
   const [showQueue, setShowQueue] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const queueListRef = useRef<HTMLDivElement>(null);
+  const currentTrackRef = useRef<HTMLDivElement>(null);
 
   const toggleMute = () => {
     if (volume > 0) {
@@ -204,6 +206,19 @@ const AudioPlayer: React.FC = () => {
     setShowQueue((prev) => !prev);
   };
 
+  // Auto-scroll to current track when queue opens
+  useEffect(() => {
+    if (showQueue && currentTrackRef.current && queueListRef.current) {
+      // Small delay to ensure the DOM has updated
+      setTimeout(() => {
+        currentTrackRef.current?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        });
+      }, 100);
+    }
+  }, [showQueue, currentTrack?.songId, currentTrack?.url]);
+
   const moveQueueItem = useCallback(
     (fromIndex: number, toIndex: number) => {
       if (fromIndex === toIndex) return;
@@ -276,7 +291,7 @@ const AudioPlayer: React.FC = () => {
   };
 
   const queuePanel = showQueue ? (
-    <div className="queue-panel">
+    <div className="queue-panel" key={`queue-${queue.length}-${currentTrack?.songId ?? currentTrack?.url ?? 'none'}`}>
       <div className="queue-panel-header">
         <span>Queue ({queue.length})</span>
         <button
@@ -291,7 +306,7 @@ const AudioPlayer: React.FC = () => {
       {queue.length === 0 ? (
         <div className="queue-empty">Queue is empty.</div>
       ) : (
-        <div className="queue-list">
+        <div className="queue-list" ref={queueListRef}>
           {queue.map((track, index) => {
             const isCurrent =
               (track.songId !== undefined &&
@@ -299,12 +314,18 @@ const AudioPlayer: React.FC = () => {
               track.url === currentTrack?.url;
             const isDragging = dragIndex === index;
             const isDragOver = dragOverIndex === index;
+            // Use a more stable key that includes both the track identifier and index
+            // This ensures React properly tracks items when the queue changes
+            const trackKey = track.songId 
+              ? `track-${track.songId}-${index}` 
+              : `track-${track.url}-${index}`;
             return (
               <div
-                key={`${track.songId ?? track.url}-${index}`}
-                className={`queue-item${isDragging ? " dragging" : ""}${
-                  isDragOver ? " drag-over" : ""
-                }`}
+                key={trackKey}
+                ref={isCurrent ? currentTrackRef : null}
+                className={`queue-item${isCurrent ? " current" : ""}${
+                  isDragging ? " dragging" : ""
+                }${isDragOver ? " drag-over" : ""}`}
                 draggable
                 onDragStart={(e) => handleQueueDragStart(e, index)}
                 onDragOver={(e) => handleQueueDragOver(e, index)}
@@ -312,7 +333,15 @@ const AudioPlayer: React.FC = () => {
                 onDragEnd={handleQueueDragEnd}
                 onClick={() => handleQueueItemClick(index)}
               >
-                <span className="queue-item-index">{index + 1}</span>
+                <span className="queue-item-index">
+                  {isCurrent ? (
+                    <span className="queue-item-playing-indicator" aria-label="Now playing">
+                      ▶
+                    </span>
+                  ) : (
+                    index + 1
+                  )}
+                </span>
                 <div className="queue-item-info">
                   <div
                     className={`queue-item-title ${isCurrent ? "playing" : ""}`}

@@ -10,6 +10,7 @@ import {
 } from "../services/db";
 import { formatDuration } from "../utils/formatDuration";
 import { shuffleArray } from "../utils/shuffleArray";
+import { buildQueueFromIndex } from "../utils/buildQueueFromIndex";
 
 const SongList: React.FC = () => {
   const [songs, setSongs] = useState<SongWithRelations[]>([]);
@@ -19,6 +20,7 @@ const SongList: React.FC = () => {
   const [selectedSongs, setSelectedSongs] = useState<Set<number>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [shuffleMode, setShuffleMode] = useState(false);
   const navigate = useNavigate();
   const {
     playTrack,
@@ -147,6 +149,10 @@ const SongList: React.FC = () => {
         }`
       );
     }
+  };
+
+  const toggleShuffleMode = () => {
+    setShuffleMode((prev) => !prev);
   };
 
   const toggleSongSelection = (
@@ -299,14 +305,30 @@ const SongList: React.FC = () => {
         })
       );
       const validTracks = tracks.filter((t) => t.url);
-      setQueue(validTracks);
 
       // Find the index of the song being played
       const songIndex = validTracks.findIndex((t) => t.songId === song.song_id);
 
       if (songIndex !== -1) {
-        playTrack(validTracks[songIndex], songIndex);
+        let reorderedTracks;
+        if (shuffleMode) {
+          // Shuffle mode: shuffle all tracks, then move selected song to front
+          const shuffledTracks = shuffleArray(validTracks);
+          const shuffledIndex = shuffledTracks.findIndex((t) => t.songId === song.song_id);
+          if (shuffledIndex !== -1) {
+            reorderedTracks = buildQueueFromIndex(shuffledTracks, shuffledIndex);
+          } else {
+            // Fallback: if song not found in shuffled array, use normal order
+            reorderedTracks = buildQueueFromIndex(validTracks, songIndex);
+          }
+        } else {
+          // Normal mode: play in order starting from selected song
+          reorderedTracks = buildQueueFromIndex(validTracks, songIndex);
+        }
+        setQueue(reorderedTracks);
+        playTrack(reorderedTracks[0], 0);
       } else {
+        setQueue(validTracks);
         // Fallback: try to get URL and play directly
         const songUrl = song.song_id ? songUrls.get(song.song_id) : null;
         let finalUrl = songUrl;
@@ -409,8 +431,8 @@ const SongList: React.FC = () => {
           ▶ play all
         </button>
         <button
-          className="btn"
-          onClick={handleShuffleAll}
+          className={shuffleMode ? "btn btn-primary" : "btn"}
+          onClick={toggleShuffleMode}
           disabled={songs.length === 0 || selectionMode}
         >
           shuffle

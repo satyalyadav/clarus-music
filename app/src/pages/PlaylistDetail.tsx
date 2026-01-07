@@ -19,6 +19,7 @@ interface Playlist {
 }
 
 import { formatDuration } from "../utils/formatDuration";
+import { buildQueueFromIndex } from "../utils/buildQueueFromIndex";
 
 const PlaylistDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -132,14 +133,16 @@ const PlaylistDetail: React.FC = () => {
         };
       })
     );
-    setQueue(tracks);
-    
+
     // Find the index of the song being played in the queue
-    const songIndex = tracks.findIndex(t => t.songId === song.song_id);
-    
+    const songIndex = tracks.findIndex((t) => t.songId === song.song_id);
+
     if (songIndex !== -1) {
-      playTrack(tracks[songIndex], songIndex);
+      const reorderedTracks = buildQueueFromIndex(tracks, songIndex);
+      setQueue(reorderedTracks);
+      playTrack(reorderedTracks[0], 0);
     } else {
+      setQueue(tracks);
       // Fallback: play directly if not found in queue
       const songUrl = await getSongUrl(song);
       playTrack({

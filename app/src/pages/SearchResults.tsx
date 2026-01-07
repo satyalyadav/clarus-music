@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { searchAll, SearchResult, getSongUrl, revokeSongUrl, SongWithRelations } from "../services/db";
 import { formatDuration } from "../utils/formatDuration";
+import { buildQueueFromIndex } from "../utils/buildQueueFromIndex";
 
 const SearchResults: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -163,14 +164,20 @@ const SearchResults: React.FC = () => {
           }
         })
       );
-      const validTracks = tracks.filter((t): t is NonNullable<typeof t> => t !== null && t.url);
-      setQueue(validTracks);
+      const validTracks = tracks.filter(
+        (t): t is NonNullable<typeof t> => t !== null && t.url
+      );
 
-      const songIndex = validTracks.findIndex(t => t.songId === song.song_id);
+      const songIndex = validTracks.findIndex(
+        (t) => t.songId === song.song_id
+      );
 
       if (songIndex !== -1) {
-        playTrack(validTracks[songIndex], songIndex);
+        const reorderedTracks = buildQueueFromIndex(validTracks, songIndex);
+        setQueue(reorderedTracks);
+        playTrack(reorderedTracks[0], 0);
       } else {
+        setQueue(validTracks);
         const songUrl = song.song_id ? songUrls.get(song.song_id) : null;
         let finalUrl = songUrl;
 

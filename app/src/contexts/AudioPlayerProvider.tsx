@@ -1,4 +1,4 @@
-import React, { useState, useRef, ReactNode, useEffect } from "react";
+import React, { useState, useRef, ReactNode, useEffect, useMemo } from "react";
 import {
   AudioPlayerContext,
   Track,
@@ -15,6 +15,8 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
   const [volume, setVolumeState] = useState(1);
   const [queue, setQueue] = useState<Track[]>([]);
   const [currentIndex, setCurrentIndex] = useState(-1);
+  const [lastQueueInsertIndex, setLastQueueInsertIndex] = useState<number>(-1);
+  const [queueVersion, setQueueVersion] = useState(0); // Force re-renders when queue changes
   const audioRef = useRef<HTMLAudioElement>(new Audio());
 
   const playTrack = (track: Track, index?: number) => {
@@ -24,47 +26,62 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
         return;
       }
 
-      if (currentTrack?.url !== track.url) {
+      const isNewSource = currentTrack?.url !== track.url;
+
+      if (isNewSource) {
         // For external URLs (like Bandcamp), we might need to set crossOrigin
-        if (track.url.startsWith('http://') || track.url.startsWith('https://')) {
+        if (
+          track.url.startsWith("http://") ||
+          track.url.startsWith("https://")
+        ) {
           // Try anonymous crossOrigin for external URLs
-          audioRef.current.crossOrigin = 'anonymous';
+          audioRef.current.crossOrigin = "anonymous";
         } else {
           audioRef.current.crossOrigin = null;
         }
-        
-        audioRef.current.src = track.url;
-        setCurrentTrack(track);
-        
-        // Log for debugging (development only)
-        if (import.meta.env.DEV) {
-          console.log('Setting audio source:', track.url);
-        }
 
+        audioRef.current.src = track.url;
+      }
+
+      setCurrentTrack(track);
+
+      // Log for debugging (development only)
+      if (import.meta.env.DEV && isNewSource) {
+        console.log("Setting audio source:", track.url);
+      }
+
+      // Use setQueue callback to access the latest queue state
+      setQueue((prevQueue) => {
         // Find index in queue - prefer songId matching over URL matching for reliability
         let idx = -1;
-        if (index !== undefined && index >= 0 && index < queue.length) {
+        if (index !== undefined && index >= 0 && index < prevQueue.length) {
           // Use provided index if valid
           idx = index;
         } else if (track.songId !== undefined) {
           // Try to find by songId first (more reliable)
-          idx = queue.findIndex((t) => t.songId === track.songId);
+          idx = prevQueue.findIndex((t) => t.songId === track.songId);
         }
 
         // Fallback to URL matching if songId didn't work
         if (idx === -1) {
-          idx = queue.findIndex((t) => t.url === track.url);
+          idx = prevQueue.findIndex((t) => t.url === track.url);
         }
 
         // If track not found in queue, add it to the end and use that index
         if (idx === -1) {
-          const newIndex = queue.length;
-          setQueue((prev) => [...prev, track]);
+          const newIndex = prevQueue.length;
           setCurrentIndex(newIndex);
+          // Update queue version inside the callback to ensure it's batched with queue update
+          setQueueVersion((v) => v + 1);
+          // Return new array
+          return [...prevQueue, track];
         } else {
           setCurrentIndex(idx);
+          // Always return a new array reference and update version to ensure React detects the change
+          setQueueVersion((v) => v + 1);
+          return [...prevQueue];
         }
-      }
+      });
 
       const playPromise = audioRef.current.play();
       if (playPromise !== undefined) {
@@ -200,7 +217,52 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
   };
 
   const addToQueue = (track: Track) => {
-    setQueue((prev) => [...prev, track]);
+    setQueue((prev) => {
+      // Handle empty queue
+      if (prev.length === 0) {
+        setLastQueueInsertIndex(0);
+        return [track];
+      }
+      
+      // Determine the reference point: after currently playing song, or after top song if nothing is playing
+      let referenceIndex: number;
+      
+      if (currentIndex >= 0 && currentIndex < prev.length) {
+        // Something is playing: insert after the current song
+        referenceIndex = currentIndex;
+      } else {
+        // Nothing is playing: insert after the top song (index 0)
+        referenceIndex = 0;
+      }
+      
+      // Determine where to insert:
+      // - If we've already inserted songs after the reference point, insert after the last one
+      // - Otherwise, insert right after the reference point
+      let insertPosition: number;
+      
+      if (lastQueueInsertIndex >= referenceIndex && lastQueueInsertIndex < prev.length) {
+        // We've already added songs after the reference point, insert after the last one
+        insertPosition = lastQueueInsertIndex + 1;
+      } else {
+        // First song being added after the reference point
+        insertPosition = referenceIndex + 1;
+      }
+      
+      // Ensure insertPosition is within bounds
+      insertPosition = Math.min(insertPosition, prev.length);
+      
+      // Insert the track at the calculated position
+      const newQueue = [...prev];
+      newQueue.splice(insertPosition, 0, track);
+      
+      // Update the last insertion index
+      setLastQueueInsertIndex(insertPosition);
+      
+      // Increment queue version to force re-render
+      setQueueVersion((v) => v + 1);
+      
+      return newQueue;
+    });
   };
 
   const stop = () => {
@@ -211,6 +273,11 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
     setCurrentTime(0);
     setDuration(0);
   };
+
+  // Reset insertion index when currentIndex changes (new song is playing)
+  useEffect(() => {
+    setLastQueueInsertIndex(-1);
+  }, [currentIndex]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -256,23 +323,46 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
     };
   }, [currentIndex, queue]);
 
-  const value: AudioPlayerContextProps = {
-    currentTrack,
-    isPlaying,
-    currentTime,
-    duration,
-    volume,
-    playTrack,
-    togglePlayPause,
-    seek,
-    setVolume,
-    playNext,
-    playPrevious,
-    stop,
-    queue,
-    setQueue,
-    addToQueue,
+  // Wrapped setQueue that resets insertion index when queue is replaced
+  const wrappedSetQueue = (tracks: Track[] | ((prev: Track[]) => Track[])) => {
+    if (typeof tracks === 'function') {
+      setQueue((prev) => {
+        const result = tracks(prev);
+        setQueueVersion((v) => v + 1); // Increment version to force re-render
+        return result;
+      });
+    } else {
+      setQueue(tracks);
+      setQueueVersion((v) => v + 1); // Increment version to force re-render
+    }
+    setLastQueueInsertIndex(-1);
   };
+
+
+  // Create context value - create new object on every render to ensure updates are detected
+  // The queue and queueVersion ensure proper re-renders when queue changes
+  const value: AudioPlayerContextProps = useMemo(
+    () => ({
+      currentTrack,
+      isPlaying,
+      currentTime,
+      duration,
+      volume,
+      playTrack,
+      togglePlayPause,
+      seek,
+      setVolume,
+      playNext,
+      playPrevious,
+      stop,
+      queue,
+      setQueue: wrappedSetQueue,
+      addToQueue,
+    }),
+    // Only include queue and queueVersion - these are the critical dependencies
+    // Other values will be included but won't cause unnecessary re-renders
+    [queue, queueVersion, currentTrack, isPlaying, currentTime, duration, volume]
+  );
 
   return (
     <AudioPlayerContext.Provider value={value}>
