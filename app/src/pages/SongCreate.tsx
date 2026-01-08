@@ -39,6 +39,17 @@ interface AlbumResult {
 
 type AddMode = "upload" | "bandcamp";
 
+interface FileFormState {
+  title: string;
+  albumId: string;
+  artistId: string;
+  coverImage: string;
+  selectedArtistIds: number[];
+  searchQuery: string;
+  searchResults: SearchResult[];
+  showResults: boolean;
+}
+
 const SongCreate = (): React.ReactElement => {
   const navigate = useNavigate();
   const [addMode, setAddMode] = useState<AddMode>("upload"); // Default to upload
@@ -52,6 +63,28 @@ const SongCreate = (): React.ReactElement => {
   const [coverImage, setCoverImage] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Multiple file upload state
+  const [files, setFiles] = useState<File[]>([]);
+  const [currentFileIndex, setCurrentFileIndex] = useState<number | null>(null);
+  const [fileMetadata, setFileMetadata] = useState<
+    Map<
+      number,
+      { duration: string; objectUrl: string; durationSeconds: number }
+    >
+  >(new Map());
+  const [playingFileIndex, setPlayingFileIndex] = useState<number | null>(null);
+  const [playbackTimes, setPlaybackTimes] = useState<Map<number, number>>(
+    new Map()
+  );
+  const [fileFormStates, setFileFormStates] = useState<
+    Map<number, FileFormState>
+  >(new Map());
+  const [useSpotifyMetadata, setUseSpotifyMetadata] = useState<boolean>(true);
+  const [incompleteFiles, setIncompleteFiles] = useState<Set<number>>(
+    new Set()
+  );
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const [albums, setAlbums] = useState<(Album & { album_id: number })[]>([]);
   const [artists, setArtists] = useState<(Artist & { artist_id: number })[]>(
@@ -71,6 +104,327 @@ const SongCreate = (): React.ReactElement => {
   const [albumResult, setAlbumResult] = useState<AlbumResult | null>(null);
   const [selectedTracks, setSelectedTracks] = useState<Set<number>>(new Set());
   const [showAlbumSelection, setShowAlbumSelection] = useState(false);
+
+  // Cleanup object URLs when component unmounts or files change
+  useEffect(() => {
+    return () => {
+      fileMetadata.forEach((metadata) => {
+        URL.revokeObjectURL(metadata.objectUrl);
+      });
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+        previewAudioRef.current = null;
+      }
+    };
+  }, []);
+
+  // Auto-save form state when form fields change (only for multi-file mode)
+  useEffect(() => {
+    if (currentFileIndex !== null && files.length > 1) {
+      setFileFormStates((prev) => {
+        const newMap = new Map(prev);
+        newMap.set(currentFileIndex, {
+          title,
+          albumId,
+          artistId,
+          coverImage,
+          selectedArtistIds: [...selectedArtistIds],
+          searchQuery,
+          searchResults: [...searchResults],
+          showResults,
+        });
+        return newMap;
+      });
+
+      // Update incomplete files set - remove from incomplete if now complete
+      const isComplete = !!(title.trim() && artistId);
+      if (isComplete) {
+        setIncompleteFiles((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(currentFileIndex);
+          return newSet;
+        });
+      }
+    }
+  }, [
+    title,
+    albumId,
+    artistId,
+    coverImage,
+    selectedArtistIds,
+    searchQuery,
+    searchResults,
+    showResults,
+    currentFileIndex,
+    files.length,
+  ]);
+
+  // When files are selected, extract metadata and set current file
+  const handleFilesSelected = async (selectedFiles: FileList | null) => {
+    if (!selectedFiles || selectedFiles.length === 0) return;
+
+    const fileArray = Array.from(selectedFiles);
+    setFiles(fileArray);
+    setCurrentFileIndex(0);
+    setError(null);
+
+    // Extract metadata for all files
+    const metadataMap = new Map<
+      number,
+      { duration: string; objectUrl: string; durationSeconds: number }
+    >();
+
+    for (let i = 0; i < fileArray.length; i++) {
+      const file = fileArray[i];
+      const objectUrl = URL.createObjectURL(file);
+
+      try {
+        const audio = new Audio();
+        audio.src = objectUrl;
+
+        const { durationStr, durationSeconds } = await new Promise<{
+          durationStr: string;
+          durationSeconds: number;
+        }>((resolve, reject) => {
+          audio.addEventListener("loadedmetadata", () => {
+            const durationSeconds = Math.floor(audio.duration);
+            const hours = Math.floor(durationSeconds / 3600);
+            const minutes = Math.floor((durationSeconds % 3600) / 60);
+            const seconds = durationSeconds % 60;
+            const durationStr = `${String(hours).padStart(2, "0")}:${String(
+              minutes
+            ).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+            resolve({ durationStr, durationSeconds });
+          });
+          audio.addEventListener("error", reject);
+        });
+
+        metadataMap.set(i, {
+          duration: durationStr,
+          objectUrl,
+          durationSeconds,
+        });
+      } catch (err) {
+        console.error(`Error extracting duration for file ${file.name}:`, err);
+        // Still create object URL even if duration extraction fails
+        const objectUrl = URL.createObjectURL(file);
+        metadataMap.set(i, {
+          duration: "00:00:00",
+          objectUrl,
+          durationSeconds: 0,
+        });
+      }
+    }
+
+    setFileMetadata(metadataMap);
+
+    // Mark all files as incomplete initially
+    const allIncomplete = new Set(fileArray.map((_, i) => i));
+    setIncompleteFiles(allIncomplete);
+
+    // Set the first file as current
+    if (fileArray.length > 0) {
+      setCurrentFileIndex(0);
+      setFile(fileArray[0]);
+      const firstMetadata = metadataMap.get(0);
+      if (firstMetadata) {
+        setDuration(firstMetadata.duration);
+      }
+    }
+  };
+
+  // Preview audio playback
+  const handlePreviewPlay = (index: number, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+
+    const metadata = fileMetadata.get(index);
+    if (!metadata) return;
+
+    // If clicking the same file that's playing, pause it
+    if (playingFileIndex === index && previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+      setPlayingFileIndex(null);
+      setPlaybackTimes((prev) => {
+        const newMap = new Map(prev);
+        newMap.delete(index);
+        return newMap;
+      });
+      return;
+    }
+
+    // Stop current playback if any
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+    }
+
+    // Clear previous playback time
+    setPlaybackTimes((prev) => {
+      const newMap = new Map(prev);
+      if (playingFileIndex !== null) {
+        newMap.delete(playingFileIndex);
+      }
+      return newMap;
+    });
+
+    // Play the selected file
+    const audio = new Audio(metadata.objectUrl);
+    previewAudioRef.current = audio;
+    setPlayingFileIndex(index);
+
+    // Update playback time
+    const updateTime = () => {
+      if (audio && !audio.paused) {
+        setPlaybackTimes((prev) => {
+          const newMap = new Map(prev);
+          newMap.set(index, audio.currentTime);
+          return newMap;
+        });
+      }
+    };
+
+    let timeInterval: ReturnType<typeof setInterval> | null = null;
+
+    const cleanup = () => {
+      if (timeInterval) {
+        clearInterval(timeInterval);
+        timeInterval = null;
+      }
+      if (previewAudioRef.current === audio) {
+        previewAudioRef.current = null;
+      }
+      if (playingFileIndex === index) {
+        setPlayingFileIndex(null);
+        setPlaybackTimes((prev) => {
+          const newMap = new Map(prev);
+          newMap.set(index, 0);
+          return newMap;
+        });
+      }
+    };
+
+    timeInterval = setInterval(updateTime, 100);
+    audio.addEventListener("timeupdate", updateTime);
+    audio.addEventListener("ended", cleanup);
+    audio.addEventListener("error", cleanup);
+
+    audio.play().catch((err) => {
+      console.error("Error playing preview:", err);
+      cleanup();
+    });
+  };
+
+  // Save current form state for a file
+  const saveCurrentFormState = (fileIndex: number | null) => {
+    if (fileIndex === null) return;
+
+    setFileFormStates((prev) => {
+      const newMap = new Map(prev);
+      newMap.set(fileIndex, {
+        title,
+        albumId,
+        artistId,
+        coverImage,
+        selectedArtistIds: [...selectedArtistIds],
+        searchQuery,
+        searchResults: [...searchResults],
+        showResults,
+      });
+      return newMap;
+    });
+  };
+
+  // Handle clicking on a file to set it as current
+  const handleFileClick = (index: number) => {
+    // Save current form state before switching
+    if (currentFileIndex !== null && currentFileIndex !== index) {
+      saveCurrentFormState(currentFileIndex);
+    }
+
+    // Stop any playing preview
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+    }
+    setPlayingFileIndex(null);
+
+    setCurrentFileIndex(index);
+    setFile(files[index]);
+    const metadata = fileMetadata.get(index);
+    if (metadata) {
+      setDuration(metadata.duration);
+    }
+
+    // Restore form state for the selected file, or reset if no saved state
+    const savedState = fileFormStates.get(index);
+    if (savedState) {
+      setTitle(savedState.title);
+      setAlbumId(savedState.albumId);
+      setArtistId(savedState.artistId);
+      setCoverImage(savedState.coverImage);
+      setSelectedArtistIds(savedState.selectedArtistIds);
+      setSearchQuery(savedState.searchQuery);
+      setSearchResults(savedState.searchResults);
+      setShowResults(savedState.showResults);
+
+      // Update incomplete files set based on restored state
+      const isComplete = !!(savedState.title.trim() && savedState.artistId);
+      setIncompleteFiles((prev) => {
+        const newSet = new Set(prev);
+        if (isComplete) {
+          newSet.delete(index);
+        } else {
+          newSet.add(index);
+        }
+        return newSet;
+      });
+    } else {
+      // Reset form for the selected file if no saved state
+      setTitle("");
+      setAlbumId("");
+      setArtistId("");
+      setCoverImage("");
+      setSelectedArtistIds([]);
+      setSearchQuery("");
+      setSearchResults([]);
+      setShowResults(false);
+
+      // Mark as incomplete
+      setIncompleteFiles((prev) => {
+        const newSet = new Set(prev);
+        newSet.add(index);
+        return newSet;
+      });
+    }
+    setError(null);
+  };
+
+  // Handle progress bar seek
+  const handleProgressSeek = (
+    index: number,
+    e: React.MouseEvent<HTMLDivElement>
+  ) => {
+    e.stopPropagation();
+    const metadata = fileMetadata.get(index);
+    if (!metadata || !previewAudioRef.current || playingFileIndex !== index)
+      return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = Math.max(0, Math.min(1, x / rect.width));
+    const newTime = percentage * metadata.durationSeconds;
+
+    previewAudioRef.current.currentTime = newTime;
+    setPlaybackTimes((prev) => {
+      const newMap = new Map(prev);
+      newMap.set(index, newTime);
+      return newMap;
+    });
+  };
 
   useEffect(() => {
     Promise.all([albumService.getAll(), artistService.getAll()]).then(
@@ -701,10 +1055,7 @@ const SongCreate = (): React.ReactElement => {
         setSongUrl(audioStreamUrl);
         // Store the original page URL (prefer pageUrl from metadata, then from result, then url)
         const pageUrl =
-          bandcampMetadata?.pageUrl ||
-          result.raw.pageUrl ||
-          bandcampUrl ||
-          "";
+          bandcampMetadata?.pageUrl || result.raw.pageUrl || bandcampUrl || "";
         setBandcampPageUrl(pageUrl);
         setFile(null); // Clear file when URL is set
 
@@ -814,9 +1165,7 @@ const SongCreate = (): React.ReactElement => {
         const normalizedName = normalizeArtistName(trimmedName);
         const existing =
           createdArtistsByName.get(normalizedName) ||
-          artists.find(
-            (a) => normalizeArtistName(a.name) === normalizedName
-          );
+          artists.find((a) => normalizeArtistName(a.name) === normalizedName);
         if (existing) {
           createdArtistsByName.set(normalizedName, existing);
           return existing;
@@ -829,7 +1178,9 @@ const SongCreate = (): React.ReactElement => {
         return artist;
       };
 
-      effectiveNames = effectiveNames.map((name) => name.trim()).filter(Boolean);
+      effectiveNames = effectiveNames
+        .map((name) => name.trim())
+        .filter(Boolean);
 
       let primaryArtistId: number | null = null;
       const allArtistIds: number[] = [];
@@ -1084,8 +1435,53 @@ const SongCreate = (): React.ReactElement => {
     }
   };
 
+  // Validate if a file has complete metadata
+  const isFileComplete = (fileIndex: number): boolean => {
+    const state = fileFormStates.get(fileIndex);
+    if (!state) return false;
+    return !!(state.title.trim() && state.artistId);
+  };
+
+  // Validate all files when in multi-file mode
+  const validateAllFiles = (): boolean => {
+    if (files.length <= 1) {
+      // Single file mode - validate current form
+      return !!(title.trim() && artistId);
+    }
+
+    // Multi-file mode - validate all files
+    const incomplete = new Set<number>();
+    for (let i = 0; i < files.length; i++) {
+      if (!isFileComplete(i)) {
+        incomplete.add(i);
+      }
+    }
+
+    setIncompleteFiles(incomplete);
+    return incomplete.size === 0;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // For multi-file mode, validate all files first
+    if (files.length > 1) {
+      if (!validateAllFiles()) {
+        const incompleteCount = incompleteFiles.size;
+        setError(
+          `${incompleteCount} file${
+            incompleteCount !== 1 ? "s" : ""
+          } missing required metadata. Please fill in title and artist for all files.`
+        );
+        // Scroll to first incomplete file
+        const firstIncomplete = Array.from(incompleteFiles)[0];
+        if (firstIncomplete !== undefined) {
+          setCurrentFileIndex(firstIncomplete);
+          handleFileClick(firstIncomplete);
+        }
+        return;
+      }
+    }
 
     // Require either file or URL
     if (!file && !songUrl) {
@@ -1128,6 +1524,87 @@ const SongCreate = (): React.ReactElement => {
     setLoading(true);
 
     try {
+      // If multi-file mode, submit all files at once
+      if (files.length > 1) {
+        let successCount = 0;
+        let errorCount = 0;
+        const errors: string[] = [];
+
+        for (let i = 0; i < files.length; i++) {
+          const fileToSubmit = files[i];
+          const fileState = fileFormStates.get(i);
+          const fileMeta = fileMetadata.get(i);
+
+          if (!fileState || !fileMeta) {
+            errorCount++;
+            errors.push(`File ${i + 1}: Missing metadata`);
+            continue;
+          }
+
+          if (!fileState.title.trim() || !fileState.artistId) {
+            errorCount++;
+            errors.push(`File ${i + 1}: Missing required fields`);
+            continue;
+          }
+
+          try {
+            // Read file as Blob
+            const fileBlob = await fileToSubmit
+              .arrayBuffer()
+              .then((buf) => new Blob([buf], { type: fileToSubmit.type }));
+
+            // Create song in IndexedDB
+            const newSongId = await songService.create({
+              title: fileState.title.trim(),
+              artist_id: parseInt(fileState.artistId),
+              album_id: fileState.albumId ? parseInt(fileState.albumId) : null,
+              duration: fileMeta.duration,
+              file_blob: fileBlob,
+              url: null,
+              bandcamp_page_url: null,
+              cover_image: fileState.coverImage || null,
+            });
+
+            // Associate artists with this song (many-to-many)
+            const primaryId = parseInt(fileState.artistId);
+            const artistIdsToAssociate = Array.from(
+              new Set([primaryId, ...fileState.selectedArtistIds])
+            );
+
+            await songArtistService.setArtistsForSong(
+              newSongId,
+              artistIdsToAssociate
+            );
+
+            successCount++;
+          } catch (err: any) {
+            errorCount++;
+            errors.push(
+              `File ${i + 1}: ${err.message || "Failed to create song"}`
+            );
+            console.error(`Error creating song for file ${i + 1}:`, err);
+          }
+        }
+
+        if (errorCount > 0) {
+          setError(
+            `Successfully added ${successCount} song(s). ${errorCount} song(s) failed:\n${errors.join(
+              "\n"
+            )}`
+          );
+          // Don't navigate if there were errors - let user see the error
+          if (successCount === 0) {
+            // All failed, stay on page
+            return;
+          }
+        }
+
+        // All successful or some successful - navigate
+        navigate("/songs");
+        return;
+      }
+
+      // Single file mode - original behavior
       let fileBlob: Blob | undefined = undefined;
 
       // Read file as Blob if file is provided
@@ -1163,7 +1640,8 @@ const SongCreate = (): React.ReactElement => {
           primaryArtistId: primaryId,
           allArtistIds: artistIdsToAssociate,
           selectedArtistIds: selectedArtistIds,
-          isBandcampSong: !!bandcampPageUrl || (songUrl && isBandcampUrl(songUrl)),
+          isBandcampSong:
+            !!bandcampPageUrl || (songUrl && isBandcampUrl(songUrl)),
         });
       }
 
@@ -1449,7 +1927,9 @@ const SongCreate = (): React.ReactElement => {
                             ...a,
                             image_url: imageUrl,
                             image_source_url: sourceUrl,
-                            image_source_provider: sourceUrl ? "bandcamp" : null,
+                            image_source_provider: sourceUrl
+                              ? "bandcamp"
+                              : null,
                           }
                         : a
                     )
@@ -2002,6 +2482,13 @@ const SongCreate = (): React.ReactElement => {
           type="button"
           className={addMode === "upload" ? "btn btn-primary" : "btn"}
           onClick={() => {
+            // Stop preview audio if playing
+            if (previewAudioRef.current) {
+              previewAudioRef.current.pause();
+              previewAudioRef.current = null;
+            }
+            setPlayingFileIndex(null);
+
             setAddMode("upload");
             setError(null);
             // Clear Bandcamp-specific state when switching to upload
@@ -2020,10 +2507,20 @@ const SongCreate = (): React.ReactElement => {
           type="button"
           className={addMode === "bandcamp" ? "btn btn-primary" : "btn"}
           onClick={() => {
+            // Stop preview audio if playing
+            if (previewAudioRef.current) {
+              previewAudioRef.current.pause();
+              previewAudioRef.current = null;
+            }
+            setPlayingFileIndex(null);
+
             setAddMode("bandcamp");
             setError(null);
             // Clear file when switching to Bandcamp
             setFile(null);
+            setFiles([]);
+            setCurrentFileIndex(null);
+            setFileMetadata(new Map());
             setDuration("");
           }}
         >
@@ -2034,189 +2531,86 @@ const SongCreate = (): React.ReactElement => {
       <form onSubmit={handleSubmit}>
         {addMode === "upload" ? (
           <>
-            <div
-              className="form-group"
-              ref={searchContainerRef}
-              style={{ position: "relative" }}
-            >
-              <label className="form-label">//search song</label>
-              <input
-                type="text"
-                className="form-input"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="type song name or paste Spotify link..."
-                onFocus={() => searchResults.length > 0 && setShowResults(true)}
-              />
-              {showResults && searchResults.length > 0 && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "100%",
-                    left: 0,
-                    right: 0,
-                    backgroundColor: "var(--card-bg)",
-                    border: "1px solid var(--border-color)",
-                    borderRadius: "4px",
-                    maxHeight: "300px",
-                    overflowY: "auto",
-                    zIndex: 1000,
-                    marginTop: "4px",
-                    boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-                  }}
-                >
-                  {searchLoading && (
-                    <div
-                      style={{
-                        padding: "12px",
-                        textAlign: "center",
-                        color: "var(--text-primary)",
-                      }}
-                    >
-                      searching...
-                    </div>
-                  )}
-                  {!searchLoading &&
-                    searchResults.map((result, index) => {
-                      const resultType = getBandcampResultType(result);
-                      return (
-                        <div
-                          key={index}
-                          onClick={() => handleSelectResult(result)}
-                          style={{
-                            padding: "12px",
-                            cursor: "pointer",
-                            borderBottom: "1px solid var(--border-color)",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "12px",
-                            backgroundColor: "var(--card-bg)",
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor =
-                              "var(--button-hover)";
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor =
-                              "var(--card-bg)";
-                          }}
-                        >
-                          {result.coverArt && (
-                            <img
-                              src={result.coverArt}
-                              alt=""
-                              style={{
-                                width: "50px",
-                                height: "50px",
-                                objectFit: "cover",
-                                borderRadius: "4px",
-                              }}
-                            />
-                          )}
-                          <div style={{ flex: 1 }}>
-                            <div
-                              style={{
-                                fontWeight: "bold",
-                                color: "var(--text-primary)",
-                              }}
-                            >
-                              {result.title || "Unknown"}
-                            </div>
-                            <div
-                              style={{
-                                fontSize: "0.9em",
-                                color: "var(--text-secondary)",
-                              }}
-                            >
-                              {result.artist || "Unknown Artist"}
-                              {resultType && (
-                                <span
-                                  style={{
-                                    textTransform: "capitalize",
-                                    marginLeft: "6px",
-                                    padding: "2px 6px",
-                                    backgroundColor:
-                                      "var(--card-bg, rgba(255, 255, 255, 0.1))",
-                                    border:
-                                      "1px solid var(--border-color, rgba(255, 255, 255, 0.2))",
-                                    borderRadius: "3px",
-                                    fontSize: "0.85em",
-                                    color: "var(--text-primary)",
-                                  }}
-                                >
-                                  {resultType}
-                                </span>
-                              )}
-                              {result.album && ` • ${result.album}`}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                </div>
-              )}
-            </div>
-
             <div className="form-group">
               <label className="form-label">//audio file</label>
               <div className="file-input-row">
                 <label className="btn btn-primary file-input-button">
-                  choose file
+                  {files.length > 1 ? "choose files" : "choose file"}
                   <input
                     type="file"
                     accept="audio/*"
+                    multiple
                     onChange={async (e) => {
-                      const selectedFile = e.target.files?.[0] || null;
-                      setFile(selectedFile);
+                      const selectedFiles = e.target.files;
+                      if (selectedFiles && selectedFiles.length > 0) {
+                        if (selectedFiles.length === 1) {
+                          // Single file - use old behavior
+                          const selectedFile = selectedFiles[0];
+                          setFile(selectedFile);
+                          setFiles([selectedFile]);
+                          setCurrentFileIndex(null);
 
-                      // Extract duration from audio file
-                      if (selectedFile) {
-                        try {
-                          const audio = new Audio();
-                          const objectUrl = URL.createObjectURL(selectedFile);
-                          audio.src = objectUrl;
+                          // Extract duration from audio file
+                          try {
+                            const audio = new Audio();
+                            const objectUrl = URL.createObjectURL(selectedFile);
+                            audio.src = objectUrl;
 
-                          await new Promise((resolve, reject) => {
-                            audio.addEventListener("loadedmetadata", () => {
-                              const durationSeconds = Math.floor(
-                                audio.duration
-                              );
-                              const hours = Math.floor(durationSeconds / 3600);
-                              const minutes = Math.floor(
-                                (durationSeconds % 3600) / 60
-                              );
-                              const seconds = durationSeconds % 60;
+                            await new Promise((resolve, reject) => {
+                              audio.addEventListener("loadedmetadata", () => {
+                                const durationSeconds = Math.floor(
+                                  audio.duration
+                                );
+                                const hours = Math.floor(
+                                  durationSeconds / 3600
+                                );
+                                const minutes = Math.floor(
+                                  (durationSeconds % 3600) / 60
+                                );
+                                const seconds = durationSeconds % 60;
 
-                              // Format as PostgreSQL interval: Always use HH:MM:SS format to avoid ambiguity
-                              // PostgreSQL interprets MM:SS as hours:minutes, so we use 00:MM:SS for songs under 1 hour
-                              const durationStr = `${String(hours).padStart(
-                                2,
-                                "0"
-                              )}:${String(minutes).padStart(2, "0")}:${String(
-                                seconds
-                              ).padStart(2, "0")}`;
+                                const durationStr = `${String(hours).padStart(
+                                  2,
+                                  "0"
+                                )}:${String(minutes).padStart(2, "0")}:${String(
+                                  seconds
+                                ).padStart(2, "0")}`;
 
-                              setDuration(durationStr);
-                              URL.revokeObjectURL(objectUrl);
-                              resolve(null);
+                                setDuration(durationStr);
+                                URL.revokeObjectURL(objectUrl);
+                                resolve(null);
+                              });
+                              audio.addEventListener("error", reject);
                             });
-                            audio.addEventListener("error", reject);
-                          });
-                        } catch (err) {
-                          console.error("Error extracting duration:", err);
-                          setDuration("");
-                          setError(
-                            "Failed to extract duration from audio file. Please try another file."
-                          );
+                          } catch (err) {
+                            console.error("Error extracting duration:", err);
+                            setDuration("");
+                            setError(
+                              "Failed to extract duration from audio file. Please try another file."
+                            );
+                          }
+                        } else {
+                          // Multiple files - use new multi-file flow
+                          await handleFilesSelected(selectedFiles);
                         }
                       } else {
+                        setFile(null);
+                        setFiles([]);
+                        setCurrentFileIndex(null);
                         setDuration("");
+                        setFileMetadata(new Map());
                       }
                     }}
                   />
                 </label>
                 <div className="file-input-name">
-                  {file ? file.name : "no file selected"}
+                  {files.length > 1
+                    ? `${files.length} file${
+                        files.length !== 1 ? "s" : ""
+                      } selected`
+                    : file
+                    ? file.name
+                    : "no file selected"}
                 </div>
               </div>
               {duration && (
@@ -2231,6 +2625,454 @@ const SongCreate = (): React.ReactElement => {
                 </div>
               )}
             </div>
+
+            {/* File list with preview - only show when multiple files selected */}
+            {files.length > 1 && (
+              <div className="form-group">
+                <label className="form-label">//files ({files.length})</label>
+                <div
+                  style={{
+                    maxHeight: "300px",
+                    overflowY: "auto",
+                    border: "1px solid var(--border-color)",
+                    borderRadius: "4px",
+                    backgroundColor: "var(--card-bg)",
+                  }}
+                >
+                  {files.map((f, index) => {
+                    const metadata = fileMetadata.get(index);
+                    const isCurrent = currentFileIndex === index;
+                    const isPlaying = playingFileIndex === index;
+                    const isIncomplete = incompleteFiles.has(index);
+                    const fileState = fileFormStates.get(index);
+                    const isFileComplete = fileState
+                      ? !!(fileState.title.trim() && fileState.artistId)
+                      : false;
+                    const durationStr = metadata?.duration || "00:00:00";
+                    const currentTime = playbackTimes.get(index) || 0;
+                    const durationSeconds = metadata?.durationSeconds || 0;
+                    const progress =
+                      durationSeconds > 0
+                        ? (currentTime / durationSeconds) * 100
+                        : 0;
+
+                    const formatTime = (seconds: number): string => {
+                      const mins = Math.floor(seconds / 60);
+                      const secs = Math.floor(seconds % 60);
+                      return `${mins}:${secs.toString().padStart(2, "0")}`;
+                    };
+
+                    return (
+                      <div
+                        key={index}
+                        onClick={() => handleFileClick(index)}
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "8px",
+                          padding: "12px",
+                          borderBottom:
+                            index < files.length - 1
+                              ? "1px solid var(--border-color)"
+                              : "none",
+                          borderLeft: isIncomplete
+                            ? "3px solid var(--error-color, #ef4444)"
+                            : "none",
+                          backgroundColor: isCurrent
+                            ? "var(--button-hover)"
+                            : isIncomplete
+                            ? "rgba(239, 68, 68, 0.1)"
+                            : "transparent",
+                          cursor: "pointer",
+                          transition: "background-color 0.2s ease",
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isCurrent) {
+                            e.currentTarget.style.backgroundColor =
+                              "var(--card-bg)";
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isCurrent) {
+                            e.currentTarget.style.backgroundColor =
+                              "transparent";
+                          }
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "12px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              minWidth: "24px",
+                              textAlign: "center",
+                              color: isCurrent
+                                ? "var(--text-primary)"
+                                : "var(--text-muted)",
+                              fontWeight: isCurrent ? "600" : "normal",
+                            }}
+                          >
+                            {index + 1}
+                          </div>
+                          <div
+                            style={{
+                              flex: 1,
+                              minWidth: 0,
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontSize: "0.9em",
+                                fontWeight: isCurrent ? "600" : "500",
+                                color: "var(--text-primary)",
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                marginBottom: "4px",
+                              }}
+                              title={f.name}
+                            >
+                              {f.name}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: "0.8em",
+                                color: "var(--text-muted)",
+                              }}
+                            >
+                              {durationStr}
+                              {isCurrent && (
+                                <span
+                                  style={{
+                                    marginLeft: "8px",
+                                    color: "var(--text-secondary)",
+                                    fontWeight: "500",
+                                  }}
+                                >
+                                  • Processing
+                                </span>
+                              )}
+                              {isIncomplete && (
+                                <span
+                                  style={{
+                                    marginLeft: "8px",
+                                    color: "var(--error-color, #ef4444)",
+                                    fontWeight: "600",
+                                  }}
+                                >
+                                  • Missing metadata
+                                </span>
+                              )}
+                              {!isIncomplete && isFileComplete && (
+                                <span
+                                  style={{
+                                    marginLeft: "8px",
+                                    color: "var(--playing-color)",
+                                    fontWeight: "500",
+                                  }}
+                                >
+                                  • Complete
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            className="btn btn-small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              handlePreviewPlay(index, e);
+                            }}
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                            }}
+                            style={{
+                              minWidth: "60px",
+                              pointerEvents: "auto",
+                            }}
+                          >
+                            {isPlaying ? "⏸ pause" : "▶ play"}
+                          </button>
+                        </div>
+
+                        {/* Progress bar */}
+                        {isPlaying && durationSeconds > 0 && (
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              marginTop: "4px",
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <span
+                              style={{
+                                fontSize: "0.75em",
+                                color: "var(--text-muted)",
+                                minWidth: "40px",
+                              }}
+                            >
+                              {formatTime(currentTime)}
+                            </span>
+                            <div
+                              onClick={(e) => handleProgressSeek(index, e)}
+                              style={{
+                                flex: 1,
+                                height: "4px",
+                                backgroundColor: "var(--border-color)",
+                                borderRadius: "2px",
+                                cursor: "pointer",
+                                position: "relative",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width: `${progress}%`,
+                                  height: "100%",
+                                  backgroundColor: "var(--playing-color)",
+                                  borderRadius: "2px",
+                                  transition: "width 0.1s linear",
+                                }}
+                              />
+                            </div>
+                            <span
+                              style={{
+                                fontSize: "0.75em",
+                                color: "var(--text-muted)",
+                                minWidth: "40px",
+                                textAlign: "right",
+                              }}
+                            >
+                              {formatTime(durationSeconds)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {currentFileIndex !== null && (
+                  <div
+                    style={{
+                      marginTop: "12px",
+                      padding: "8px 12px",
+                      backgroundColor: "var(--button-hover)",
+                      borderRadius: "4px",
+                      fontSize: "0.9em",
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    Processing file {currentFileIndex + 1} of {files.length}:{" "}
+                    <strong>{files[currentFileIndex]?.name}</strong>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Metadata source toggle */}
+            <div className="form-group">
+              <label className="form-label">//metadata source</label>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "12px",
+                  padding: "8px 12px",
+                  backgroundColor: "var(--card-bg)",
+                  border: "1px solid var(--border-color)",
+                  borderRadius: "4px",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: "0.9em",
+                    color: useSpotifyMetadata
+                      ? "var(--text-muted)"
+                      : "var(--text-primary)",
+                    fontWeight: useSpotifyMetadata ? "normal" : "600",
+                  }}
+                >
+                  Manual
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setUseSpotifyMetadata(!useSpotifyMetadata)}
+                  style={{
+                    width: "44px",
+                    height: "24px",
+                    borderRadius: "12px",
+                    border: "none",
+                    backgroundColor: useSpotifyMetadata
+                      ? "var(--button-hover)"
+                      : "var(--border-color)",
+                    cursor: "pointer",
+                    position: "relative",
+                    transition: "background-color 0.2s ease",
+                  }}
+                  aria-label={useSpotifyMetadata ? "Use Spotify" : "Use Manual"}
+                >
+                  <div
+                    style={{
+                      width: "20px",
+                      height: "20px",
+                      borderRadius: "50%",
+                      backgroundColor: useSpotifyMetadata
+                        ? "var(--text-primary)"
+                        : "var(--card-bg)",
+                      position: "absolute",
+                      top: "2px",
+                      left: useSpotifyMetadata ? "22px" : "2px",
+                      transition: "left 0.2s ease, background-color 0.2s ease",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                    }}
+                  />
+                </button>
+                <span
+                  style={{
+                    fontSize: "0.9em",
+                    color: useSpotifyMetadata
+                      ? "var(--text-primary)"
+                      : "var(--text-muted)",
+                    fontWeight: useSpotifyMetadata ? "600" : "normal",
+                  }}
+                >
+                  Spotify
+                </span>
+              </div>
+            </div>
+
+            {/* Search song section - appears after file selection, only if Spotify is enabled */}
+            {useSpotifyMetadata && (
+              <div
+                className="form-group"
+                ref={searchContainerRef}
+                style={{ position: "relative" }}
+              >
+                <label className="form-label">//search song</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="type song name or paste Spotify link..."
+                  onFocus={() =>
+                    searchResults.length > 0 && setShowResults(true)
+                  }
+                />
+                {showResults && searchResults.length > 0 && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "100%",
+                      left: 0,
+                      right: 0,
+                      backgroundColor: "var(--card-bg)",
+                      border: "1px solid var(--border-color)",
+                      borderRadius: "4px",
+                      maxHeight: "300px",
+                      overflowY: "auto",
+                      zIndex: 1000,
+                      marginTop: "4px",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+                    }}
+                  >
+                    {searchLoading && (
+                      <div
+                        style={{
+                          padding: "12px",
+                          textAlign: "center",
+                          color: "var(--text-primary)",
+                        }}
+                      >
+                        searching...
+                      </div>
+                    )}
+                    {!searchLoading &&
+                      searchResults.map((result, index) => {
+                        const resultType = getBandcampResultType(result);
+                        return (
+                          <div
+                            key={index}
+                            onClick={() => handleSelectResult(result)}
+                            style={{
+                              padding: "12px",
+                              cursor: "pointer",
+                              borderBottom: "1px solid var(--border-color)",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "12px",
+                              backgroundColor: "var(--card-bg)",
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor =
+                                "var(--button-hover)";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor =
+                                "var(--card-bg)";
+                            }}
+                          >
+                            {result.coverArt && (
+                              <img
+                                src={result.coverArt}
+                                alt=""
+                                style={{
+                                  width: "50px",
+                                  height: "50px",
+                                  objectFit: "cover",
+                                  borderRadius: "4px",
+                                }}
+                              />
+                            )}
+                            <div style={{ flex: 1 }}>
+                              <div
+                                style={{
+                                  fontWeight: "bold",
+                                  color: "var(--text-primary)",
+                                }}
+                              >
+                                {result.title || "Unknown"}
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: "0.9em",
+                                  color: "var(--text-secondary)",
+                                }}
+                              >
+                                {result.artist || "Unknown Artist"}
+                                {resultType && (
+                                  <span
+                                    style={{
+                                      textTransform: "capitalize",
+                                      marginLeft: "6px",
+                                      padding: "2px 6px",
+                                      backgroundColor:
+                                        "var(--card-bg, rgba(255, 255, 255, 0.1))",
+                                      border:
+                                        "1px solid var(--border-color, rgba(255, 255, 255, 0.2))",
+                                      borderRadius: "3px",
+                                      fontSize: "0.85em",
+                                      color: "var(--text-primary)",
+                                    }}
+                                  >
+                                    {resultType}
+                                  </span>
+                                )}
+                                {result.album && ` • ${result.album}`}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+            )}
           </>
         ) : (
           <div
@@ -2640,12 +3482,15 @@ const SongCreate = (): React.ReactElement => {
             disabled={
               loading ||
               (addMode === "bandcamp" &&
-                (searchLoading || !songUrl || !title.trim() || !artistId))
+                (searchLoading || !songUrl || !title.trim() || !artistId)) ||
+              (files.length > 1 && incompleteFiles.size > 0)
             }
           >
             {loading
               ? addMode === "bandcamp"
                 ? "adding..."
+                : files.length > 1 && currentFileIndex !== null
+                ? `uploading ${currentFileIndex + 1}/${files.length}...`
                 : "uploading..."
               : addMode === "bandcamp"
               ? searchLoading
@@ -2653,6 +3498,8 @@ const SongCreate = (): React.ReactElement => {
                 : !songUrl
                 ? "waiting for url..."
                 : "add song"
+              : files.length > 1 && currentFileIndex !== null
+              ? `add song ${currentFileIndex + 1}/${files.length}`
               : "create song"}
           </button>
           <button
