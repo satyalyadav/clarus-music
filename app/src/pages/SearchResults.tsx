@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
-import { searchAll, SearchResult, getSongUrl, revokeSongUrl, SongWithRelations } from "../services/db";
+import { useSongUrls } from "../hooks/useSongUrls";
+import { searchAll, SearchResult, SongWithRelations } from "../services/db";
 import { formatDuration } from "../utils/formatDuration";
-import { buildQueueFromIndex } from "../utils/buildQueueFromIndex";
+import { getErrorMessage } from "../utils/errorUtils";
+import { playQueueFromIndex, playQueueFromStart } from "../utils/queuePlayback";
+import { buildTracksFromSongs, createTrackFromSong } from "../utils/trackUtils";
 
 const SearchResults: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -11,8 +14,9 @@ const SearchResults: React.FC = () => {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [songUrls, setSongUrls] = useState<Map<number, string>>(new Map());
   const navigate = useNavigate();
+  const { songUrls, getOrCreateSongUrl, prefetchSongUrls, syncSongUrls } =
+    useSongUrls();
   const {
     playTrack,
     currentTrack,
@@ -36,19 +40,11 @@ const SearchResults: React.FC = () => {
         const searchResults = await searchAll(query);
         setResults(searchResults);
 
-        // Create object URLs for all songs in results
-        const urlMap = new Map<number, string>();
-        for (const result of searchResults) {
-          if (result.type === 'song' && result.song?.song_id) {
-            try {
-              const url = await getSongUrl(result.song);
-              urlMap.set(result.song.song_id, url);
-            } catch (err) {
-              console.error(`Failed to create URL for song ${result.song.song_id}:`, err);
-            }
-          }
-        }
-        setSongUrls(urlMap);
+        const songResults = searchResults
+          .filter((result) => result.type === "song" && result.song)
+          .map((result) => result.song as SongWithRelations);
+        syncSongUrls(songResults);
+        await prefetchSongUrls(songResults);
       } catch (e: any) {
         setError(e.message);
       } finally {
@@ -57,12 +53,7 @@ const SearchResults: React.FC = () => {
     };
 
     performSearch();
-
-    // Cleanup: revoke object URLs when component unmounts
-    return () => {
-      songUrls.forEach(url => revokeSongUrl(url));
-    };
-  }, [query]);
+  }, [query, prefetchSongUrls, syncSongUrls]);
 
   const handlePlayAll = async () => {
     const songResults = results.filter(r => r.type === 'song' && r.song);
@@ -71,48 +62,18 @@ const SearchResults: React.FC = () => {
       return;
     }
     try {
-      const tracks = await Promise.all(
-        songResults.map(async (result) => {
-          if (!result.song) return null;
-          const s = result.song;
-          try {
-            const url = s.song_id ? songUrls.get(s.song_id) : null;
-            if (!url && s.song_id) {
-              const newUrl = await getSongUrl(s);
-              setSongUrls(prev => new Map(prev).set(s.song_id!, newUrl));
-              return {
-                url: newUrl,
-                title: s.title,
-                artist: s.artist_name || "",
-                album: s.album_title || "",
-                cover: s.cover_image || "",
-                songId: s.song_id,
-              };
-            }
-            return {
-              url: url || "",
-              title: s.title,
-              artist: s.artist_name || "",
-              album: s.album_title || "",
-              cover: s.cover_image || "",
-              songId: s.song_id,
-            };
-          } catch (err) {
-            console.error(`Failed to get URL for song ${s.song_id}:`, err);
-            return null;
-          }
-        })
-      );
-      const validTracks = tracks.filter((t): t is NonNullable<typeof t> => t !== null && t.url);
+      const songs = songResults
+        .map((result) => result.song)
+        .filter((song): song is SongWithRelations => Boolean(song));
+      const validTracks = await buildTracksFromSongs(songs, getOrCreateSongUrl);
       if (validTracks.length === 0) {
         alert('No playable songs found');
         return;
       }
-      setQueue(validTracks);
-      if (validTracks[0]) playTrack(validTracks[0], 0);
+      playQueueFromStart(validTracks, setQueue, playTrack);
     } catch (err) {
       console.error('Error playing all songs:', err);
-      alert(`Failed to play songs: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      alert(`Failed to play songs: ${getErrorMessage(err, "Unknown error")}`);
     }
   };
 
@@ -131,115 +92,52 @@ const SearchResults: React.FC = () => {
   const handlePlaySong = async (song: SongWithRelations) => {
     try {
       // Get all songs from results for queue
-      const songResults = results.filter(r => r.type === 'song' && r.song);
-      const tracks = await Promise.all(
-        songResults.map(async (result) => {
-          if (!result.song) return null;
-          const s = result.song;
-          try {
-            const url = s.song_id ? songUrls.get(s.song_id) : null;
-            if (!url && s.song_id) {
-              const newUrl = await getSongUrl(s);
-              setSongUrls(prev => new Map(prev).set(s.song_id!, newUrl));
-              return {
-                url: newUrl,
-                title: s.title,
-                artist: s.artist_name || "",
-                album: s.album_title || "",
-                cover: s.cover_image || "",
-                songId: s.song_id,
-              };
-            }
-            return {
-              url: url || "",
-              title: s.title,
-              artist: s.artist_name || "",
-              album: s.album_title || "",
-              cover: s.cover_image || "",
-              songId: s.song_id,
-            };
-          } catch (err) {
-            console.error(`Failed to get URL for song ${s.song_id}:`, err);
-            return null;
-          }
-        })
-      );
-      const validTracks = tracks.filter(
-        (t): t is NonNullable<typeof t> => t !== null && t.url
-      );
+      const songResults = results.filter((r) => r.type === "song" && r.song);
+      const songs = songResults
+        .map((result) => result.song)
+        .filter((result): result is SongWithRelations => Boolean(result));
+      const validTracks = await buildTracksFromSongs(songs, getOrCreateSongUrl);
 
       const songIndex = validTracks.findIndex(
         (t) => t.songId === song.song_id
       );
 
       if (songIndex !== -1) {
-        const reorderedTracks = buildQueueFromIndex(validTracks, songIndex);
-        setQueue(reorderedTracks);
-        playTrack(reorderedTracks[0], 0);
+        playQueueFromIndex(validTracks, songIndex, setQueue, playTrack);
       } else {
         setQueue(validTracks);
-        const songUrl = song.song_id ? songUrls.get(song.song_id) : null;
-        let finalUrl = songUrl;
-
-        if (!songUrl && song.song_id) {
-          try {
-            finalUrl = await getSongUrl(song);
-            setSongUrls(prev => new Map(prev).set(song.song_id!, finalUrl));
-          } catch (err) {
-            console.error(`Failed to get URL for song ${song.song_id}:`, err);
-            alert(`Cannot play song: ${err instanceof Error ? err.message : 'Song file not available'}`);
-            return;
-          }
+        try {
+          const finalUrl = await getOrCreateSongUrl(song);
+          playTrack(createTrackFromSong(song, finalUrl));
+        } catch (err) {
+          console.error(`Failed to get URL for song ${song.song_id}:`, err);
+          alert(
+            `Cannot play song: ${
+              getErrorMessage(err, "Song file not available")
+            }`
+          );
         }
-
-        if (!finalUrl) {
-          alert('Cannot play song: Song file not available');
-          return;
-        }
-
-        playTrack({
-          url: finalUrl,
-          title: song.title,
-          artist: song.artist_name || "",
-          album: song.album_title || "",
-          cover: song.cover_image || "",
-          songId: song.song_id,
-        });
       }
     } catch (err) {
       console.error('Error playing song:', err);
-      alert(`Failed to play song: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      alert(`Failed to play song: ${getErrorMessage(err, "Unknown error")}`);
     }
   };
 
   const handleAddToQueue = async (song: SongWithRelations) => {
     try {
-      const songUrl = song.song_id ? songUrls.get(song.song_id) : null;
-      let finalUrl = songUrl;
-
-      if (!songUrl && song.song_id) {
-        finalUrl = await getSongUrl(song);
-        setSongUrls(prev => new Map(prev).set(song.song_id!, finalUrl));
-      }
-
+      const finalUrl = await getOrCreateSongUrl(song);
       if (!finalUrl) {
         alert("Cannot queue song: Song file not available");
         return;
       }
 
-      addToQueue({
-        url: finalUrl,
-        title: song.title,
-        artist: song.artist_name || "",
-        album: song.album_title || "",
-        cover: song.cover_image || "",
-        songId: song.song_id,
-      });
+      addToQueue(createTrackFromSong(song, finalUrl));
     } catch (err) {
       console.error("Error adding song to queue:", err);
       alert(
         `Failed to add to queue: ${
-          err instanceof Error ? err.message : "Unknown error"
+          getErrorMessage(err, "Unknown error")
         }`
       );
     }

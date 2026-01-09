@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
+import QueuePanel from "./QueuePanel";
 
 function formatTime(seconds: number): string {
   if (isNaN(seconds)) return "0:00";
@@ -293,79 +294,24 @@ const AudioPlayer: React.FC = () => {
     }
   };
 
-  const queuePanel = showQueue ? (
-    <div className="queue-panel" key={`queue-${queue.length}`}>
-      <div className="queue-panel-header">
-        <span>Queue ({queue.length})</span>
-        <button
-          className="btn btn-icon queue-close"
-          onClick={toggleQueue}
-          aria-label="Close queue"
-          title="Close queue"
-        >
-          <span className="btn-icon-content">x</span>
-        </button>
-      </div>
-      {queue.length === 0 ? (
-        <div className="queue-empty">Queue is empty.</div>
-      ) : (
-        <div className="queue-list" ref={queueListRef}>
-          {queue.map((track, index) => {
-            const isCurrent =
-              (track.songId !== undefined &&
-                track.songId === currentTrack?.songId) ||
-              track.url === currentTrack?.url;
-            const isDragging = dragIndex === index;
-            const isDragOver = dragOverIndex === index;
-            // Use a more stable key that includes both the track identifier and index
-            // This ensures React properly tracks items when the queue changes
-            const trackKey = track.songId 
-              ? `track-${track.songId}-${index}` 
-              : `track-${track.url}-${index}`;
-            return (
-              <div
-                key={trackKey}
-                ref={isCurrent ? currentTrackRef : null}
-                className={`queue-item${isCurrent ? " current" : ""}${
-                  isDragging ? " dragging" : ""
-                }${isDragOver ? " drag-over" : ""}`}
-                draggable
-                onDragStart={(e) => handleQueueDragStart(e, index)}
-                onDragOver={(e) => handleQueueDragOver(e, index)}
-                onDrop={(e) => handleQueueDrop(e, index)}
-                onDragEnd={handleQueueDragEnd}
-                onClick={() => handleQueueItemClick(index)}
-              >
-                <span className="queue-item-index">
-                  {isCurrent ? (
-                    <span className="queue-item-playing-indicator" aria-label="Now playing">
-                      ▶
-                    </span>
-                  ) : (
-                    index + 1
-                  )}
-                </span>
-                <div className="queue-item-info">
-                  <div
-                    className={`queue-item-title ${isCurrent ? "playing" : ""}`}
-                  >
-                    {track.title || "Unknown"}
-                  </div>
-                  <div className="queue-item-subtitle">
-                    {track.artist || "Unknown Artist"}
-                    {track.album ? ` • ${track.album}` : ""}
-                  </div>
-                </div>
-                <span className="queue-drag-handle" aria-hidden="true">
-                  :::
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  ) : null;
+  const queuePanel = (
+    <QueuePanel
+      key={`queue-${queue.length}`}
+      show={showQueue}
+      queue={queue}
+      currentTrack={currentTrack}
+      queueListRef={queueListRef}
+      currentTrackRef={currentTrackRef}
+      dragIndex={dragIndex}
+      dragOverIndex={dragOverIndex}
+      onClose={toggleQueue}
+      onItemClick={handleQueueItemClick}
+      onDragStart={handleQueueDragStart}
+      onDragOver={handleQueueDragOver}
+      onDrop={handleQueueDrop}
+      onDragEnd={handleQueueDragEnd}
+    />
+  );
 
   if (!currentTrack) {
     return (

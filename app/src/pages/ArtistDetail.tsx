@@ -1,18 +1,20 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
+import { useSongUrls } from "../hooks/useSongUrls";
 import {
   artistService,
   songService,
   albumService,
   songArtistService,
-  getSongUrl,
   SongWithRelations,
 } from "../services/db";
 import { artistImageService } from "../services/artistImageService";
 import { formatDuration } from "../utils/formatDuration";
+import { getErrorMessage } from "../utils/errorUtils";
 import { shuffleArray } from "../utils/shuffleArray";
-import { buildQueueFromIndex } from "../utils/buildQueueFromIndex";
+import { playQueueFromIndex, playQueueFromStart } from "../utils/queuePlayback";
+import { buildTracksFromSongs, createTrackFromSong } from "../utils/trackUtils";
 
 interface Artist {
   artist_id?: number;
@@ -29,15 +31,9 @@ const ArtistDetail: React.FC = () => {
   const [artist, setArtist] = useState<Artist | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [shuffleMode, setShuffleMode] = useState(false);
-  const {
-    playTrack,
-    currentTrack,
-    isPlaying,
-    setQueue,
-    togglePlayPause,
-    addToQueue,
-  } = useAudioPlayer();
+  const { playTrack, currentTrack, setQueue, togglePlayPause, addToQueue } =
+    useAudioPlayer();
+  const { getOrCreateSongUrl } = useSongUrls();
 
   useEffect(() => {
     const loadData = async () => {
@@ -48,7 +44,7 @@ const ArtistDetail: React.FC = () => {
           artistService.getById(artistId),
           songService.getByArtist(artistId),
         ]);
-        
+
         if (artistData) {
           // Get songs with relations
           const [albums, allArtists] = await Promise.all([
@@ -61,7 +57,9 @@ const ArtistDetail: React.FC = () => {
               { title: a.title, cover_image: a.cover_image },
             ])
           );
-          const artistMap = new Map(allArtists.map((a) => [a.artist_id, a.name]));
+          const artistMap = new Map(
+            allArtists.map((a) => [a.artist_id, a.name])
+          );
 
           const songsWithRelations: SongWithRelations[] = await Promise.all(
             songsData.map(async (song) => {
@@ -76,7 +74,9 @@ const ArtistDetail: React.FC = () => {
                 .map((id) => artistMap.get(id))
                 .filter((n): n is string => !!n);
               const artistDisplay =
-                artistNames.length > 0 ? artistNames.join(", ") : artistData.name;
+                artistNames.length > 0
+                  ? artistNames.join(", ")
+                  : artistData.name;
 
               return {
                 ...song,
@@ -91,14 +91,18 @@ const ArtistDetail: React.FC = () => {
               };
             })
           );
-          
+
           setArtist({
             ...artistData,
             songs: songsWithRelations,
           });
 
           // Fetch image in background if not present
-          if (artistData.artist_id && artistData.name && !artistData.image_url) {
+          if (
+            artistData.artist_id &&
+            artistData.name &&
+            !artistData.image_url
+          ) {
             artistImageService
               .fetchAndUpdateArtistImage(artistData.artist_id, artistData.name)
               .then((imageInfo) => {
@@ -171,38 +175,23 @@ const ArtistDetail: React.FC = () => {
 
   const buildTracks = async () => {
     if (!artist) return [];
-    return Promise.all(
-      artist.songs.map(async (s) => {
-        const url = await getSongUrl(s);
-        return {
-          url,
-          title: s.title,
-          artist: s.artist_name || artist.name,
-          album: s.album_title || "",
-          cover: s.cover_image || s.album_cover_image || "",
-          songId: s.song_id,
-        };
-      })
-    );
+    return buildTracksFromSongs(artist.songs, getOrCreateSongUrl, (song) => ({
+      artist: song.artist_name || artist.name,
+      cover: song.cover_image || song.album_cover_image || "",
+    }));
   };
 
   const handlePlayAll = async () => {
     if (!artist || artist.songs.length === 0) return;
     const tracks = await buildTracks();
-    setQueue(tracks);
-    if (tracks[0]) playTrack(tracks[0], 0);
+    playQueueFromStart(tracks, setQueue, playTrack);
   };
 
   const handleShuffleAll = async () => {
     if (!artist || artist.songs.length === 0) return;
     const tracks = await buildTracks();
     const shuffledTracks = shuffleArray(tracks);
-    setQueue(shuffledTracks);
-    if (shuffledTracks[0]) playTrack(shuffledTracks[0], 0);
-  };
-
-  const toggleShuffleMode = () => {
-    setShuffleMode((prev) => !prev);
+    playQueueFromStart(shuffledTracks, setQueue, playTrack);
   };
 
   const handlePlaySong = async (song: SongWithRelations) => {
@@ -213,57 +202,40 @@ const ArtistDetail: React.FC = () => {
     const songIndex = tracks.findIndex((t) => t.songId === song.song_id);
 
     if (songIndex !== -1) {
-      let reorderedTracks;
-      if (shuffleMode) {
-        // Shuffle mode: shuffle all tracks, then move selected song to front
-        const shuffledTracks = shuffleArray(tracks);
-        const shuffledIndex = shuffledTracks.findIndex((t) => t.songId === song.song_id);
-        if (shuffledIndex !== -1) {
-          reorderedTracks = buildQueueFromIndex(shuffledTracks, shuffledIndex);
-        } else {
-          // Fallback: if song not found in shuffled array, use normal order
-          reorderedTracks = buildQueueFromIndex(tracks, songIndex);
-        }
-      } else {
-        // Normal mode: play in order starting from selected song
-        reorderedTracks = buildQueueFromIndex(tracks, songIndex);
-      }
-      setQueue(reorderedTracks);
-      playTrack(reorderedTracks[0], 0);
+      // Play in order starting from selected song
+      playQueueFromIndex(tracks, songIndex, setQueue, playTrack);
     } else {
       setQueue(tracks);
-      // Fallback: play directly if not found in queue
-      const songUrl = await getSongUrl(song);
-      playTrack({
-        url: songUrl,
-        title: song.title,
-        artist: song.artist_name || artist.name,
-        album: song.album_title || "",
-        cover: song.cover_image || song.album_cover_image || "",
-        songId: song.song_id,
-      });
+      try {
+        const songUrl = await getOrCreateSongUrl(song);
+        playTrack(
+          createTrackFromSong(song, songUrl, {
+            artist: song.artist_name || artist.name,
+            cover: song.cover_image || song.album_cover_image || "",
+          })
+        );
+      } catch (err) {
+        console.error(`Failed to get URL for song ${song.song_id}:`, err);
+        alert(
+          `Cannot play song: ${getErrorMessage(err, "Song file not available")}`
+        );
+      }
     }
   };
 
   const handleAddToQueue = async (song: SongWithRelations) => {
     if (!artist) return;
     try {
-      const songUrl = await getSongUrl(song);
-      addToQueue({
-        url: songUrl,
-        title: song.title,
-        artist: song.artist_name || artist.name,
-        album: song.album_title || "",
-        cover: song.cover_image || song.album_cover_image || "",
-        songId: song.song_id,
-      });
+      const songUrl = await getOrCreateSongUrl(song);
+      addToQueue(
+        createTrackFromSong(song, songUrl, {
+          artist: song.artist_name || artist.name,
+          cover: song.cover_image || song.album_cover_image || "",
+        })
+      );
     } catch (err) {
       console.error("Error adding song to queue:", err);
-      alert(
-        `Failed to add to queue: ${
-          err instanceof Error ? err.message : "Unknown error"
-        }`
-      );
+      alert(`Failed to add to queue: ${getErrorMessage(err, "Unknown error")}`);
     }
   };
 
@@ -336,7 +308,9 @@ const ArtistDetail: React.FC = () => {
                 href={artist.image_source_url}
                 target="_blank"
                 rel="noreferrer"
-                aria-label={`Open ${artist.image_source_provider || "artist"} page`}
+                aria-label={`Open ${
+                  artist.image_source_provider || "artist"
+                } page`}
                 title={`Open ${artist.image_source_provider || "artist"} page`}
                 style={{
                   display: "inline-flex",
@@ -375,8 +349,8 @@ const ArtistDetail: React.FC = () => {
               ▶ play all
             </button>
             <button
-              className={shuffleMode ? "btn btn-primary" : "btn"}
-              onClick={toggleShuffleMode}
+              className="btn"
+              onClick={handleShuffleAll}
               disabled={artist.songs.length === 0}
             >
               shuffle
@@ -391,18 +365,20 @@ const ArtistDetail: React.FC = () => {
         <div className="list">
           {artist.songs.map((song) => {
             // Use songId for reliable matching, fallback to title/artist matching
-            const isCurrent = (song.song_id && currentTrack?.songId === song.song_id) ||
-                             (currentTrack?.title === song.title && 
-                              currentTrack?.artist === artist.name);
-            const isCurrentPlaying = isCurrent && isPlaying;
+            const isCurrent =
+              (song.song_id && currentTrack?.songId === song.song_id) ||
+              (currentTrack?.title === song.title &&
+                currentTrack?.artist === artist.name);
 
             const coverImage = song.cover_image || song.album_cover_image;
 
             return (
-              <div 
-                key={song.song_id} 
+              <div
+                key={song.song_id}
                 className="list-item"
-                onClick={() => isCurrent ? togglePlayPause() : handlePlaySong(song)}
+                onClick={() =>
+                  isCurrent ? togglePlayPause() : handlePlaySong(song)
+                }
               >
                 {coverImage && (
                   <img

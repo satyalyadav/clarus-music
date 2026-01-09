@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { searchAll, SearchResult, getSongUrl, playlistService } from "../services/db";
+import { searchAll, SearchResult } from "../services/db";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
+import { useSongUrls } from "../hooks/useSongUrls";
+import { createTrackFromSong } from "../utils/trackUtils";
+import { getErrorMessage } from "../utils/errorUtils";
 
 const SearchBar: React.FC = () => {
   const [query, setQuery] = useState("");
@@ -10,7 +13,8 @@ const SearchBar: React.FC = () => {
   const [showResults, setShowResults] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const navigate = useNavigate();
-  const { playTrack, setQueue } = useAudioPlayer();
+  const { playTrack } = useAudioPlayer();
+  const { getOrCreateSongUrl } = useSongUrls();
   const searchRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -85,18 +89,11 @@ const SearchBar: React.FC = () => {
       // Play song
       try {
         const song = result.song;
-        const url = await getSongUrl(song);
-        playTrack({
-          url,
-          title: song.title,
-          artist: song.artist_name || "",
-          album: song.album_title || "",
-          cover: song.cover_image || "",
-          songId: song.song_id,
-        });
+        const url = await getOrCreateSongUrl(song);
+        playTrack(createTrackFromSong(song, url));
       } catch (err) {
         console.error("Error playing song:", err);
-        alert(`Failed to play song: ${err instanceof Error ? err.message : "Unknown error"}`);
+        alert(`Failed to play song: ${getErrorMessage(err, "Unknown error")}`);
       }
     } else if (result.type === 'playlist' && result.id) {
       // Navigate to playlist

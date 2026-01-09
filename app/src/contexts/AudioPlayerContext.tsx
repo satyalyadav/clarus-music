@@ -23,7 +23,7 @@ export interface AudioPlayerContextProps {
   playPrevious: () => void;
   stop: () => void;
   queue: Track[];
-  setQueue: (tracks: Track[]) => void;
+  setQueue: (tracks: Track[] | ((prev: Track[]) => Track[])) => void;
   addToQueue: (track: Track) => void;
 }
 

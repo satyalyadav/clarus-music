@@ -1,27 +1,24 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
-import {
-  getSongsWithRelations,
-  getSongUrl,
-  revokeSongUrl,
-  songService,
-  SongWithRelations,
-} from "../services/db";
+import { useSongUrls } from "../hooks/useSongUrls";
+import { getSongsWithRelations, songService, SongWithRelations } from "../services/db";
 import { formatDuration } from "../utils/formatDuration";
+import { getErrorMessage } from "../utils/errorUtils";
 import { shuffleArray } from "../utils/shuffleArray";
-import { buildQueueFromIndex } from "../utils/buildQueueFromIndex";
+import { playQueueFromIndex, playQueueFromStart } from "../utils/queuePlayback";
+import { buildTracksFromSongs, createTrackFromSong } from "../utils/trackUtils";
 
 const SongList: React.FC = () => {
   const [songs, setSongs] = useState<SongWithRelations[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [songUrls, setSongUrls] = useState<Map<number, string>>(new Map());
   const [selectedSongs, setSelectedSongs] = useState<Set<number>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [shuffleMode, setShuffleMode] = useState(false);
   const navigate = useNavigate();
+  const { songUrls, getOrCreateSongUrl, prefetchSongUrls, syncSongUrls } =
+    useSongUrls();
   const {
     playTrack,
     currentTrack,
@@ -37,22 +34,8 @@ const SongList: React.FC = () => {
         const songsData = await getSongsWithRelations();
         setSongs(songsData);
 
-        // Create object URLs for all songs
-        const urlMap = new Map<number, string>();
-        for (const song of songsData) {
-          if (song.song_id) {
-            try {
-              const url = await getSongUrl(song);
-              urlMap.set(song.song_id, url);
-            } catch (err) {
-              console.error(
-                `Failed to create URL for song ${song.song_id}:`,
-                err
-              );
-            }
-          }
-        }
-        setSongUrls(urlMap);
+        syncSongUrls(songsData);
+        await prefetchSongUrls(songsData);
         setError(null);
       } catch (e: any) {
         setError(e.message);
@@ -62,52 +45,10 @@ const SongList: React.FC = () => {
     };
     loadSongs();
 
-    // Cleanup: revoke object URLs when component unmounts
-    return () => {
-      songUrls.forEach((url) => revokeSongUrl(url));
-    };
-  }, []);
+  }, [prefetchSongUrls, syncSongUrls]);
 
   const buildTracks = async () => {
-    const tracks = await Promise.all(
-      songs.map(async (s) => {
-        try {
-          const url = s.song_id ? songUrls.get(s.song_id) : null;
-          if (!url && s.song_id) {
-            // Create URL if not already created
-            const newUrl = await getSongUrl(s);
-            setSongUrls((prev) => new Map(prev).set(s.song_id!, newUrl));
-            return {
-              url: newUrl,
-              title: s.title,
-              artist: s.artist_name || "",
-              album: s.album_title || "",
-              cover: s.cover_image || "",
-              songId: s.song_id,
-            };
-          }
-          return {
-            url: url || "",
-            title: s.title,
-            artist: s.artist_name || "",
-            album: s.album_title || "",
-            cover: s.cover_image || "",
-            songId: s.song_id,
-          };
-        } catch (err) {
-          console.error(`Failed to get URL for song ${s.song_id}:`, err);
-          return {
-            url: "",
-            title: s.title,
-            artist: s.artist_name || "",
-            album: s.album_title || "",
-            cover: s.cover_image || "",
-            songId: s.song_id,
-          };
-        }
-      })
-    );
-    return tracks.filter((t) => t.url);
+    return buildTracksFromSongs(songs, getOrCreateSongUrl);
   };
 
   const handlePlayAll = async () => {
@@ -118,13 +59,12 @@ const SongList: React.FC = () => {
         alert("No playable songs found");
         return;
       }
-      setQueue(validTracks);
-      if (validTracks[0]) playTrack(validTracks[0], 0);
+      playQueueFromStart(validTracks, setQueue, playTrack);
     } catch (err) {
       console.error("Error playing all songs:", err);
       alert(
         `Failed to play songs: ${
-          err instanceof Error ? err.message : "Unknown error"
+          getErrorMessage(err, "Unknown error")
         }`
       );
     }
@@ -139,20 +79,15 @@ const SongList: React.FC = () => {
         return;
       }
       const shuffledTracks = shuffleArray(validTracks);
-      setQueue(shuffledTracks);
-      if (shuffledTracks[0]) playTrack(shuffledTracks[0], 0);
+      playQueueFromStart(shuffledTracks, setQueue, playTrack);
     } catch (err) {
       console.error("Error shuffling songs:", err);
       alert(
         `Failed to shuffle songs: ${
-          err instanceof Error ? err.message : "Unknown error"
+          getErrorMessage(err, "Unknown error")
         }`
       );
     }
-  };
-
-  const toggleShuffleMode = () => {
-    setShuffleMode((prev) => !prev);
   };
 
   const toggleSongSelection = (
@@ -242,22 +177,8 @@ const SongList: React.FC = () => {
       const songsData = await getSongsWithRelations();
       setSongs(songsData);
 
-      // Recreate URLs for remaining songs
-      const urlMap = new Map<number, string>();
-      for (const song of songsData) {
-        if (song.song_id) {
-          try {
-            const url = await getSongUrl(song);
-            urlMap.set(song.song_id, url);
-          } catch (err) {
-            console.error(
-              `Failed to create URL for song ${song.song_id}:`,
-              err
-            );
-          }
-        }
-      }
-      setSongUrls(urlMap);
+      syncSongUrls(songsData);
+      await prefetchSongUrls(songsData);
     } catch (err: any) {
       setError(err.message || "Failed to delete songs");
     } finally {
@@ -267,107 +188,33 @@ const SongList: React.FC = () => {
 
   const handlePlaySong = async (song: SongWithRelations) => {
     try {
-      const tracks = await Promise.all(
-        songs.map(async (s) => {
-          try {
-            const url = s.song_id ? songUrls.get(s.song_id) : null;
-            if (!url && s.song_id) {
-              const newUrl = await getSongUrl(s);
-              setSongUrls((prev) => new Map(prev).set(s.song_id!, newUrl));
-              return {
-                url: newUrl,
-                title: s.title,
-                artist: s.artist_name || "",
-                album: s.album_title || "",
-                cover: s.cover_image || "",
-                songId: s.song_id,
-              };
-            }
-            return {
-              url: url || "",
-              title: s.title,
-              artist: s.artist_name || "",
-              album: s.album_title || "",
-              cover: s.cover_image || "",
-              songId: s.song_id,
-            };
-          } catch (err) {
-            console.error(`Failed to get URL for song ${s.song_id}:`, err);
-            return {
-              url: "",
-              title: s.title,
-              artist: s.artist_name || "",
-              album: s.album_title || "",
-              cover: s.cover_image || "",
-              songId: s.song_id,
-            };
-          }
-        })
-      );
-      const validTracks = tracks.filter((t) => t.url);
+      const validTracks = await buildTracks();
 
       // Find the index of the song being played
       const songIndex = validTracks.findIndex((t) => t.songId === song.song_id);
 
       if (songIndex !== -1) {
-        let reorderedTracks;
-        if (shuffleMode) {
-          // Shuffle mode: shuffle all tracks, then move selected song to front
-          const shuffledTracks = shuffleArray(validTracks);
-          const shuffledIndex = shuffledTracks.findIndex((t) => t.songId === song.song_id);
-          if (shuffledIndex !== -1) {
-            reorderedTracks = buildQueueFromIndex(shuffledTracks, shuffledIndex);
-          } else {
-            // Fallback: if song not found in shuffled array, use normal order
-            reorderedTracks = buildQueueFromIndex(validTracks, songIndex);
-          }
-        } else {
-          // Normal mode: play in order starting from selected song
-          reorderedTracks = buildQueueFromIndex(validTracks, songIndex);
-        }
-        setQueue(reorderedTracks);
-        playTrack(reorderedTracks[0], 0);
+        // Play in order starting from selected song
+        playQueueFromIndex(validTracks, songIndex, setQueue, playTrack);
       } else {
         setQueue(validTracks);
-        // Fallback: try to get URL and play directly
-        const songUrl = song.song_id ? songUrls.get(song.song_id) : null;
-        let finalUrl = songUrl;
-
-        if (!songUrl && song.song_id) {
-          try {
-            const newUrl = await getSongUrl(song);
-            finalUrl = newUrl;
-            setSongUrls((prev) => new Map(prev).set(song.song_id!, newUrl));
-          } catch (err) {
-            console.error(`Failed to get URL for song ${song.song_id}:`, err);
-            alert(
-              `Cannot play song: ${
-                err instanceof Error ? err.message : "Song file not available"
-              }`
-            );
-            return;
-          }
+        try {
+          const finalUrl = await getOrCreateSongUrl(song);
+          playTrack(createTrackFromSong(song, finalUrl));
+        } catch (err) {
+          console.error(`Failed to get URL for song ${song.song_id}:`, err);
+          alert(
+            `Cannot play song: ${
+              getErrorMessage(err, "Song file not available")
+            }`
+          );
         }
-
-        if (!finalUrl) {
-          alert("Cannot play song: Song file not available");
-          return;
-        }
-
-        playTrack({
-          url: finalUrl,
-          title: song.title,
-          artist: song.artist_name || "",
-          album: song.album_title || "",
-          cover: song.cover_image || "",
-          songId: song.song_id,
-        });
       }
     } catch (err) {
       console.error("Error playing song:", err);
       alert(
         `Failed to play song: ${
-          err instanceof Error ? err.message : "Unknown error"
+          getErrorMessage(err, "Unknown error")
         }`
       );
     }
@@ -375,33 +222,18 @@ const SongList: React.FC = () => {
 
   const handleAddToQueue = async (song: SongWithRelations) => {
     try {
-      const songUrl = song.song_id ? songUrls.get(song.song_id) : null;
-      let finalUrl = songUrl;
-
-      if (!songUrl && song.song_id) {
-        const newUrl = await getSongUrl(song);
-        finalUrl = newUrl;
-        setSongUrls((prev) => new Map(prev).set(song.song_id!, newUrl));
-      }
-
+      const finalUrl = await getOrCreateSongUrl(song);
       if (!finalUrl) {
         alert("Cannot queue song: Song file not available");
         return;
       }
 
-      addToQueue({
-        url: finalUrl,
-        title: song.title,
-        artist: song.artist_name || "",
-        album: song.album_title || "",
-        cover: song.cover_image || "",
-        songId: song.song_id,
-      });
+      addToQueue(createTrackFromSong(song, finalUrl));
     } catch (err) {
       console.error("Error adding song to queue:", err);
       alert(
         `Failed to add to queue: ${
-          err instanceof Error ? err.message : "Unknown error"
+          getErrorMessage(err, "Unknown error")
         }`
       );
     }
@@ -431,8 +263,8 @@ const SongList: React.FC = () => {
           ▶ play all
         </button>
         <button
-          className={shuffleMode ? "btn btn-primary" : "btn"}
-          onClick={toggleShuffleMode}
+          className="btn"
+          onClick={handleShuffleAll}
           disabled={songs.length === 0 || selectionMode}
         >
           shuffle

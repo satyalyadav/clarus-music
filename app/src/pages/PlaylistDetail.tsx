@@ -1,14 +1,18 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
+import { useSongUrls } from "../hooks/useSongUrls";
 import {
   playlistService,
   artistService,
   albumService,
   songArtistService,
-  getSongUrl,
   SongWithRelations,
 } from "../services/db";
+import { formatDuration } from "../utils/formatDuration";
+import { getErrorMessage } from "../utils/errorUtils";
+import { playQueueFromIndex, playQueueFromStart } from "../utils/queuePlayback";
+import { buildTracksFromSongs, createTrackFromSong } from "../utils/trackUtils";
 
 interface Playlist {
   playlist_id?: number;
@@ -18,23 +22,15 @@ interface Playlist {
   songs: SongWithRelations[];
 }
 
-import { formatDuration } from "../utils/formatDuration";
-import { buildQueueFromIndex } from "../utils/buildQueueFromIndex";
-
 const PlaylistDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const {
-    playTrack,
-    currentTrack,
-    isPlaying,
-    setQueue,
-    togglePlayPause,
-    addToQueue,
-  } = useAudioPlayer();
+  const { playTrack, currentTrack, setQueue, togglePlayPause, addToQueue } =
+    useAudioPlayer();
+  const { getOrCreateSongUrl } = useSongUrls();
 
   const fetchPlaylist = async () => {
     if (!id) return;
@@ -45,14 +41,16 @@ const PlaylistDetail: React.FC = () => {
         playlistService.getById(playlistId),
         playlistService.getSongs(playlistId),
       ]);
-      
+
       if (playlistData) {
         // Get songs with relations
         const [artistsData, albumsData] = await Promise.all([
           artistService.getAll(),
           albumService.getAll(),
         ]);
-        const artistMap = new Map(artistsData.map((a) => [a.artist_id, a.name]));
+        const artistMap = new Map(
+          artistsData.map((a) => [a.artist_id, a.name])
+        );
         const albumMap = new Map(albumsData.map((a) => [a.album_id, a.title]));
 
         const songsWithRelations: SongWithRelations[] = await Promise.all(
@@ -77,11 +75,13 @@ const PlaylistDetail: React.FC = () => {
               ...song,
               artist_names: artistNames,
               artist_name: artistDisplay,
-              album_title: song.album_id ? albumMap.get(song.album_id) : undefined,
+              album_title: song.album_id
+                ? albumMap.get(song.album_id)
+                : undefined,
             };
           })
         );
-        
+
         setPlaylist({
           ...playlistData,
           songs: songsWithRelations,
@@ -101,79 +101,46 @@ const PlaylistDetail: React.FC = () => {
 
   const handlePlayAll = async () => {
     if (!playlist || playlist.songs.length === 0) return;
-    const tracks = await Promise.all(
-      playlist.songs.map(async (s) => {
-        const url = await getSongUrl(s);
-        return {
-          url,
-          title: s.title,
-          artist: s.artist_name || "",
-          album: s.album_title || "",
-          cover: s.cover_image || "",
-          songId: s.song_id,
-        };
-      })
+    const tracks = await buildTracksFromSongs(
+      playlist.songs,
+      getOrCreateSongUrl
     );
-    setQueue(tracks);
-    if (tracks[0]) playTrack(tracks[0], 0);
+    playQueueFromStart(tracks, setQueue, playTrack);
   };
 
   const handlePlaySong = async (song: SongWithRelations) => {
     if (!playlist) return;
-    const tracks = await Promise.all(
-      playlist.songs.map(async (s) => {
-        const url = await getSongUrl(s);
-        return {
-          url,
-          title: s.title,
-          artist: s.artist_name || "",
-          album: s.album_title || "",
-          cover: s.cover_image || "",
-          songId: s.song_id,
-        };
-      })
+    const tracks = await buildTracksFromSongs(
+      playlist.songs,
+      getOrCreateSongUrl
     );
 
     // Find the index of the song being played in the queue
     const songIndex = tracks.findIndex((t) => t.songId === song.song_id);
 
     if (songIndex !== -1) {
-      const reorderedTracks = buildQueueFromIndex(tracks, songIndex);
-      setQueue(reorderedTracks);
-      playTrack(reorderedTracks[0], 0);
+      playQueueFromIndex(tracks, songIndex, setQueue, playTrack);
     } else {
       setQueue(tracks);
-      // Fallback: play directly if not found in queue
-      const songUrl = await getSongUrl(song);
-      playTrack({
-        url: songUrl,
-        title: song.title,
-        artist: song.artist_name || "",
-        album: song.album_title || "",
-        cover: song.cover_image || "",
-        songId: song.song_id,
-      });
+      try {
+        const songUrl = await getOrCreateSongUrl(song);
+        playTrack(createTrackFromSong(song, songUrl));
+      } catch (err) {
+        console.error(`Failed to get URL for song ${song.song_id}:`, err);
+        alert(
+          `Cannot play song: ${getErrorMessage(err, "Song file not available")}`
+        );
+      }
     }
   };
 
   const handleAddToQueue = async (song: SongWithRelations) => {
     try {
-      const songUrl = await getSongUrl(song);
-      addToQueue({
-        url: songUrl,
-        title: song.title,
-        artist: song.artist_name || "",
-        album: song.album_title || "",
-        cover: song.cover_image || "",
-        songId: song.song_id,
-      });
+      const songUrl = await getOrCreateSongUrl(song);
+      addToQueue(createTrackFromSong(song, songUrl));
     } catch (err) {
       console.error("Error adding song to queue:", err);
-      alert(
-        `Failed to add to queue: ${
-          err instanceof Error ? err.message : "Unknown error"
-        }`
-      );
+      alert(`Failed to add to queue: ${getErrorMessage(err, "Unknown error")}`);
     }
   };
 
@@ -238,15 +205,17 @@ const PlaylistDetail: React.FC = () => {
             {playlist.songs.length}{" "}
             {playlist.songs.length === 1 ? "song" : "songs"}
           </p>
-          <p
-            style={{
-              color: "var(--text-muted)",
-              marginBottom: "16px",
-              fontSize: "12px",
-            }}
-          >
-            Created {new Date(playlist.date_created).toLocaleDateString()}
-          </p>
+          {playlist.date_created && (
+            <p
+              style={{
+                color: "var(--text-muted)",
+                marginBottom: "16px",
+                fontSize: "12px",
+              }}
+            >
+              Created {new Date(playlist.date_created).toLocaleDateString()}
+            </p>
+          )}
           <div style={{ display: "flex", gap: "12px" }}>
             <button
               className="btn btn-primary"
@@ -281,16 +250,18 @@ const PlaylistDetail: React.FC = () => {
         <div className="list">
           {playlist.songs.map((song, index) => {
             // Use songId for reliable matching, fallback to title/artist matching
-            const isCurrent = (song.song_id && currentTrack?.songId === song.song_id) ||
-                             (currentTrack?.title === song.title && 
-                              currentTrack?.artist === (song.artist_name || ""));
-            const isCurrentPlaying = isCurrent && isPlaying;
+            const isCurrent =
+              (song.song_id && currentTrack?.songId === song.song_id) ||
+              (currentTrack?.title === song.title &&
+                currentTrack?.artist === (song.artist_name || ""));
 
             return (
-              <div 
-                key={song.song_id} 
+              <div
+                key={song.song_id}
                 className="list-item"
-                onClick={() => isCurrent ? togglePlayPause() : handlePlaySong(song)}
+                onClick={() =>
+                  isCurrent ? togglePlayPause() : handlePlaySong(song)
+                }
               >
                 <span
                   style={{
@@ -330,13 +301,19 @@ const PlaylistDetail: React.FC = () => {
                   >
                     queue
                   </button>
-                  <button
-                    className="btn btn-small btn-danger"
-                    onClick={() => handleRemoveSong(song.song_id)}
-                    title="Remove from playlist"
-                  >
-                    x
-                  </button>
+                  {song.song_id && (
+                    <button
+                      className="btn btn-small btn-danger"
+                      onClick={() => {
+                        if (song.song_id) {
+                          handleRemoveSong(song.song_id);
+                        }
+                      }}
+                      title="Remove from playlist"
+                    >
+                      x
+                    </button>
+                  )}
                 </div>
               </div>
             );

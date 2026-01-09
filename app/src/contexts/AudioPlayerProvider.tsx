@@ -1,4 +1,11 @@
-import React, { useState, useRef, ReactNode, useEffect, useMemo } from "react";
+import React, {
+  useState,
+  useRef,
+  ReactNode,
+  useEffect,
+  useMemo,
+  useCallback,
+} from "react";
 import {
   AudioPlayerContext,
   Track,
@@ -16,7 +23,6 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
   const [queue, setQueue] = useState<Track[]>([]);
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [lastQueueInsertIndex, setLastQueueInsertIndex] = useState<number>(-1);
-  const [queueVersion, setQueueVersion] = useState(0); // Force re-renders when queue changes
   const audioRef = useRef<HTMLAudioElement>(new Audio());
 
   const playTrack = (track: Track, index?: number) => {
@@ -71,14 +77,11 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
         if (idx === -1) {
           const newIndex = prevQueue.length;
           setCurrentIndex(newIndex);
-          // Update queue version inside the callback to ensure it's batched with queue update
-          setQueueVersion((v) => v + 1);
           // Return new array
           return [...prevQueue, track];
         } else {
           setCurrentIndex(idx);
-          // Always return a new array reference and update version to ensure React detects the change
-          setQueueVersion((v) => v + 1);
+          // Always return a new array reference so consumers re-render
           return [...prevQueue];
         }
       });
@@ -122,43 +125,38 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
     setVolumeState(vol);
   };
 
-  const playNext = () => {
-    if (queue.length === 0 || !currentTrack) return;
-    
-    // Always verify currentIndex points to the current track
-    // This handles cases where the queue was updated but currentIndex is stale
+  const resolveCurrentIndex = useCallback(() => {
+    if (queue.length === 0 || !currentTrack) return -1;
+
     let actualCurrentIndex = currentIndex;
-    
-    // Verify the currentIndex is valid and points to the current track
     if (currentIndex < 0 || currentIndex >= queue.length) {
-      actualCurrentIndex = -1; // Invalid, need to find it
+      actualCurrentIndex = -1;
     } else {
       const trackAtCurrentIndex = queue[currentIndex];
-      // Check if the track at currentIndex matches the current track
-      const matches = currentTrack.songId !== undefined
-        ? trackAtCurrentIndex.songId === currentTrack.songId
-        : trackAtCurrentIndex.url === currentTrack.url;
-      
+      const matches =
+        currentTrack.songId !== undefined
+          ? trackAtCurrentIndex.songId === currentTrack.songId
+          : trackAtCurrentIndex.url === currentTrack.url;
       if (!matches) {
-        actualCurrentIndex = -1; // Doesn't match, need to find it
+        actualCurrentIndex = -1;
       }
     }
-    
-    // If currentIndex is invalid or doesn't match, find the current track
+
     if (actualCurrentIndex === -1) {
-      actualCurrentIndex = currentTrack.songId !== undefined
-        ? queue.findIndex((t) => t.songId === currentTrack.songId)
-        : queue.findIndex((t) => t.url === currentTrack.url);
+      actualCurrentIndex =
+        currentTrack.songId !== undefined
+          ? queue.findIndex((t) => t.songId === currentTrack.songId)
+          : queue.findIndex((t) => t.url === currentTrack.url);
     }
-    
-    // If still not found, can't proceed
-    if (actualCurrentIndex === -1) {
-      return;
-    }
-    
-    // Calculate next index
+
+    return actualCurrentIndex;
+  }, [queue, currentTrack, currentIndex]);
+
+  const playNext = useCallback(() => {
+    const actualCurrentIndex = resolveCurrentIndex();
+    if (actualCurrentIndex === -1) return;
+
     const nextIndex = actualCurrentIndex + 1;
-    
     if (nextIndex >= 0 && nextIndex < queue.length) {
       const nextTrack = queue[nextIndex];
       setCurrentIndex(nextIndex);
@@ -167,45 +165,13 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
       audioRef.current.play();
       setIsPlaying(true);
     }
-  };
+  }, [queue, resolveCurrentIndex]);
 
-  const playPrevious = () => {
-    if (queue.length === 0 || !currentTrack) return;
-    
-    // Always verify currentIndex points to the current track
-    // This handles cases where the queue was updated but currentIndex is stale
-    let actualCurrentIndex = currentIndex;
-    
-    // Verify the currentIndex is valid and points to the current track
-    if (currentIndex < 0 || currentIndex >= queue.length) {
-      actualCurrentIndex = -1; // Invalid, need to find it
-    } else {
-      const trackAtCurrentIndex = queue[currentIndex];
-      // Check if the track at currentIndex matches the current track
-      const matches = currentTrack.songId !== undefined
-        ? trackAtCurrentIndex.songId === currentTrack.songId
-        : trackAtCurrentIndex.url === currentTrack.url;
-      
-      if (!matches) {
-        actualCurrentIndex = -1; // Doesn't match, need to find it
-      }
-    }
-    
-    // If currentIndex is invalid or doesn't match, find the current track
-    if (actualCurrentIndex === -1) {
-      actualCurrentIndex = currentTrack.songId !== undefined
-        ? queue.findIndex((t) => t.songId === currentTrack.songId)
-        : queue.findIndex((t) => t.url === currentTrack.url);
-    }
-    
-    // If still not found, can't proceed
-    if (actualCurrentIndex === -1) {
-      return;
-    }
-    
-    // Calculate previous index
+  const playPrevious = useCallback(() => {
+    const actualCurrentIndex = resolveCurrentIndex();
+    if (actualCurrentIndex === -1) return;
+
     const prevIndex = actualCurrentIndex - 1;
-    
     if (prevIndex >= 0 && prevIndex < queue.length) {
       const prevTrack = queue[prevIndex];
       setCurrentIndex(prevIndex);
@@ -214,7 +180,7 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
       audioRef.current.play();
       setIsPlaying(true);
     }
-  };
+  }, [queue, resolveCurrentIndex]);
 
   const addToQueue = (track: Track) => {
     setQueue((prev) => {
@@ -257,10 +223,7 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
       
       // Update the last insertion index
       setLastQueueInsertIndex(insertPosition);
-      
-      // Increment queue version to force re-render
-      setQueueVersion((v) => v + 1);
-      
+
       return newQueue;
     });
   };
@@ -279,26 +242,44 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
     setLastQueueInsertIndex(-1);
   }, [currentIndex]);
 
+  const playNextRef = useRef(playNext);
+
+  useEffect(() => {
+    playNextRef.current = playNext;
+  }, [playNext]);
+
   useEffect(() => {
     const audio = audioRef.current;
     const onTimeUpdate = () => setCurrentTime(audio.currentTime);
     const onLoadedMeta = () => {
       setDuration(audio.duration);
       if (import.meta.env.DEV) {
-        console.log('Audio metadata loaded. Duration:', audio.duration, 'URL:', audio.src);
+        console.log(
+          "Audio metadata loaded. Duration:",
+          audio.duration,
+          "URL:",
+          audio.src
+        );
       }
     };
     const onEnded = () => {
       setIsPlaying(false);
-      playNext();
+      playNextRef.current();
     };
     const onError = (e: Event) => {
-      console.error('Audio error:', e, 'URL:', audio.src, 'Error code:', (audio as any).error?.code);
+      console.error(
+        "Audio error:",
+        e,
+        "URL:",
+        audio.src,
+        "Error code:",
+        (audio as any).error?.code
+      );
       setIsPlaying(false);
     };
     const onCanPlay = () => {
       if (import.meta.env.DEV) {
-        console.log('Audio can play:', audio.src);
+        console.log("Audio can play:", audio.src);
       }
     };
     const onPlay = () => setIsPlaying(true);
@@ -321,26 +302,22 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
       audio.removeEventListener("play", onPlay);
       audio.removeEventListener("pause", onPause);
     };
-  }, [currentIndex, queue]);
+  }, []);
 
   // Wrapped setQueue that resets insertion index when queue is replaced
   const wrappedSetQueue = (tracks: Track[] | ((prev: Track[]) => Track[])) => {
-    if (typeof tracks === 'function') {
+    if (typeof tracks === "function") {
       setQueue((prev) => {
         const result = tracks(prev);
-        setQueueVersion((v) => v + 1); // Increment version to force re-render
-        return result;
+        return Array.isArray(result) ? [...result] : result;
       });
     } else {
-      setQueue(tracks);
-      setQueueVersion((v) => v + 1); // Increment version to force re-render
+      setQueue([...tracks]);
     }
     setLastQueueInsertIndex(-1);
   };
 
-
   // Create context value - create new object on every render to ensure updates are detected
-  // The queue and queueVersion ensure proper re-renders when queue changes
   const value: AudioPlayerContextProps = useMemo(
     () => ({
       currentTrack,
@@ -359,9 +336,7 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
       setQueue: wrappedSetQueue,
       addToQueue,
     }),
-    // Only include queue and queueVersion - these are the critical dependencies
-    // Other values will be included but won't cause unnecessary re-renders
-    [queue, queueVersion, currentTrack, isPlaying, currentTime, duration, volume]
+    [queue, currentTrack, isPlaying, currentTime, duration, volume]
   );
 
   return (

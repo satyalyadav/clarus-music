@@ -1,17 +1,19 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
+import { useSongUrls } from "../hooks/useSongUrls";
 import {
   albumService,
   songService,
   artistService,
   songArtistService,
-  getSongUrl,
   SongWithRelations,
 } from "../services/db";
 import { formatDuration } from "../utils/formatDuration";
+import { getErrorMessage } from "../utils/errorUtils";
 import { shuffleArray } from "../utils/shuffleArray";
-import { buildQueueFromIndex } from "../utils/buildQueueFromIndex";
+import { playQueueFromIndex, playQueueFromStart } from "../utils/queuePlayback";
+import { buildTracksFromSongs, createTrackFromSong } from "../utils/trackUtils";
 
 interface Album {
   album_id?: number;
@@ -26,15 +28,9 @@ const AlbumDetail: React.FC = () => {
   const [album, setAlbum] = useState<Album | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [shuffleMode, setShuffleMode] = useState(false);
-  const {
-    playTrack,
-    currentTrack,
-    isPlaying,
-    setQueue,
-    togglePlayPause,
-    addToQueue,
-  } = useAudioPlayer();
+  const { playTrack, currentTrack, setQueue, togglePlayPause, addToQueue } =
+    useAudioPlayer();
+  const { getOrCreateSongUrl } = useSongUrls();
 
   useEffect(() => {
     const loadData = async () => {
@@ -45,15 +41,19 @@ const AlbumDetail: React.FC = () => {
           albumService.getById(albumId),
           songService.getByAlbum(albumId),
         ]);
-        
+
         if (albumData) {
           // Get songs with relations
           const [artistsData, albumsData] = await Promise.all([
             artistService.getAll(),
             albumService.getAll(),
           ]);
-          const artistMap = new Map(artistsData.map((a) => [a.artist_id, a.name]));
-          const albumMap = new Map(albumsData.map((a) => [a.album_id, a.title]));
+          const artistMap = new Map(
+            artistsData.map((a) => [a.artist_id, a.name])
+          );
+          const albumMap = new Map(
+            albumsData.map((a) => [a.album_id, a.title])
+          );
 
           const songsWithRelations: SongWithRelations[] = await Promise.all(
             songsData.map(async (song) => {
@@ -77,11 +77,13 @@ const AlbumDetail: React.FC = () => {
                 ...song,
                 artist_names: artistNames,
                 artist_name: artistDisplay,
-                album_title: song.album_id ? albumMap.get(song.album_id) : undefined,
+                album_title: song.album_id
+                  ? albumMap.get(song.album_id)
+                  : undefined,
               };
             })
           );
-          
+
           setAlbum({
             ...albumData,
             songs: songsWithRelations,
@@ -99,38 +101,23 @@ const AlbumDetail: React.FC = () => {
 
   const buildTracks = async () => {
     if (!album) return [];
-    return Promise.all(
-      album.songs.map(async (s) => {
-        const url = await getSongUrl(s);
-        return {
-          url,
-          title: s.title,
-          artist: s.artist_name || "",
-          album: album.title,
-          cover: s.cover_image || album.cover_image || "",
-          songId: s.song_id,
-        };
-      })
-    );
+    return buildTracksFromSongs(album.songs, getOrCreateSongUrl, (song) => ({
+      album: album.title,
+      cover: song.cover_image || album.cover_image || "",
+    }));
   };
 
   const handlePlayAll = async () => {
     if (!album || album.songs.length === 0) return;
     const tracks = await buildTracks();
-    setQueue(tracks);
-    if (tracks[0]) playTrack(tracks[0], 0);
+    playQueueFromStart(tracks, setQueue, playTrack);
   };
 
   const handleShuffleAll = async () => {
     if (!album || album.songs.length === 0) return;
     const tracks = await buildTracks();
     const shuffledTracks = shuffleArray(tracks);
-    setQueue(shuffledTracks);
-    if (shuffledTracks[0]) playTrack(shuffledTracks[0], 0);
-  };
-
-  const toggleShuffleMode = () => {
-    setShuffleMode((prev) => !prev);
+    playQueueFromStart(shuffledTracks, setQueue, playTrack);
   };
 
   const handlePlaySong = async (song: SongWithRelations) => {
@@ -141,57 +128,40 @@ const AlbumDetail: React.FC = () => {
     const songIndex = tracks.findIndex((t) => t.songId === song.song_id);
 
     if (songIndex !== -1) {
-      let reorderedTracks;
-      if (shuffleMode) {
-        // Shuffle mode: shuffle all tracks, then move selected song to front
-        const shuffledTracks = shuffleArray(tracks);
-        const shuffledIndex = shuffledTracks.findIndex((t) => t.songId === song.song_id);
-        if (shuffledIndex !== -1) {
-          reorderedTracks = buildQueueFromIndex(shuffledTracks, shuffledIndex);
-        } else {
-          // Fallback: if song not found in shuffled array, use normal order
-          reorderedTracks = buildQueueFromIndex(tracks, songIndex);
-        }
-      } else {
-        // Normal mode: play in order starting from selected song
-        reorderedTracks = buildQueueFromIndex(tracks, songIndex);
-      }
-      setQueue(reorderedTracks);
-      playTrack(reorderedTracks[0], 0);
+      // Play in order starting from selected song
+      playQueueFromIndex(tracks, songIndex, setQueue, playTrack);
     } else {
       setQueue(tracks);
-      // Fallback: play directly if not found in queue
-      const songUrl = await getSongUrl(song);
-      playTrack({
-        url: songUrl,
-        title: song.title,
-        artist: song.artist_name || "",
-        album: album.title,
-        cover: song.cover_image || album.cover_image || "",
-        songId: song.song_id,
-      });
+      try {
+        const songUrl = await getOrCreateSongUrl(song);
+        playTrack(
+          createTrackFromSong(song, songUrl, {
+            album: album.title,
+            cover: song.cover_image || album.cover_image || "",
+          })
+        );
+      } catch (err) {
+        console.error(`Failed to get URL for song ${song.song_id}:`, err);
+        alert(
+          `Cannot play song: ${getErrorMessage(err, "Song file not available")}`
+        );
+      }
     }
   };
 
   const handleAddToQueue = async (song: SongWithRelations) => {
     if (!album) return;
     try {
-      const songUrl = await getSongUrl(song);
-      addToQueue({
-        url: songUrl,
-        title: song.title,
-        artist: song.artist_name || "",
-        album: album.title,
-        cover: song.cover_image || album.cover_image || "",
-        songId: song.song_id,
-      });
+      const songUrl = await getOrCreateSongUrl(song);
+      addToQueue(
+        createTrackFromSong(song, songUrl, {
+          album: album.title,
+          cover: song.cover_image || album.cover_image || "",
+        })
+      );
     } catch (err) {
       console.error("Error adding song to queue:", err);
-      alert(
-        `Failed to add to queue: ${
-          err instanceof Error ? err.message : "Unknown error"
-        }`
-      );
+      alert(`Failed to add to queue: ${getErrorMessage(err, "Unknown error")}`);
     }
   };
 
@@ -211,8 +181,11 @@ const AlbumDetail: React.FC = () => {
 
       <div style={{ display: "flex", gap: "24px", marginBottom: "32px" }}>
         {(() => {
-          const coverImage = album.cover_image || 
-            (album.songs.length > 0 ? album.songs.find(s => s.cover_image)?.cover_image : null);
+          const coverImage =
+            album.cover_image ||
+            (album.songs.length > 0
+              ? album.songs.find((s) => s.cover_image)?.cover_image
+              : null);
           return coverImage ? (
             <img
               src={coverImage}
@@ -251,8 +224,8 @@ const AlbumDetail: React.FC = () => {
               ▶ play album
             </button>
             <button
-              className={shuffleMode ? "btn btn-primary" : "btn"}
-              onClick={toggleShuffleMode}
+              className="btn"
+              onClick={handleShuffleAll}
               disabled={album.songs.length === 0}
             >
               shuffle
@@ -267,16 +240,18 @@ const AlbumDetail: React.FC = () => {
         <div className="list">
           {album.songs.map((song, index) => {
             // Use songId for reliable matching, fallback to title/artist matching
-            const isCurrent = (song.song_id && currentTrack?.songId === song.song_id) ||
-                             (currentTrack?.title === song.title && 
-                              currentTrack?.artist === (song.artist_name || ""));
-            const isCurrentPlaying = isCurrent && isPlaying;
+            const isCurrent =
+              (song.song_id && currentTrack?.songId === song.song_id) ||
+              (currentTrack?.title === song.title &&
+                currentTrack?.artist === (song.artist_name || ""));
 
             return (
-              <div 
-                key={song.song_id} 
+              <div
+                key={song.song_id}
                 className="list-item"
-                onClick={() => isCurrent ? togglePlayPause() : handlePlaySong(song)}
+                onClick={() =>
+                  isCurrent ? togglePlayPause() : handlePlaySong(song)
+                }
               >
                 <span
                   style={{

@@ -1,55 +1,89 @@
-import { useState, useEffect } from 'react';
-import { Song, getSongUrl, revokeSongUrl } from '../services/db';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getSongUrl, revokeSongUrl, Song } from "../services/db";
 
-/**
- * Hook to manage object URLs for songs
- * Automatically creates and cleans up object URLs
- */
-export function useSongUrls(songs: Song[]) {
-  const [songUrls, setSongUrls] = useState<Map<number, string>>(new Map());
+type SongUrlMap = Map<number, string>;
+
+export const useSongUrls = () => {
+  const [songUrls, setSongUrls] = useState<SongUrlMap>(new Map());
+  const songUrlsRef = useRef<SongUrlMap>(songUrls);
 
   useEffect(() => {
-    const urlMap = new Map<number, string>();
-    
-    // Create object URLs for all songs
-    const createUrls = async () => {
-      for (const song of songs) {
-        if (song.song_id) {
+    songUrlsRef.current = songUrls;
+  }, [songUrls]);
+
+  const setSongUrl = useCallback((songId: number, url: string) => {
+    setSongUrls((prev) => {
+      const next = new Map(prev);
+      const existing = next.get(songId);
+      if (existing && existing !== url) {
+        revokeSongUrl(existing);
+      }
+      next.set(songId, url);
+      songUrlsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const getOrCreateSongUrl = useCallback(
+    async (song: Song) => {
+      if (song.song_id && songUrlsRef.current.has(song.song_id)) {
+        return songUrlsRef.current.get(song.song_id)!;
+      }
+
+      const url = await getSongUrl(song);
+      if (song.song_id) {
+        setSongUrl(song.song_id, url);
+      }
+      return url;
+    },
+    [setSongUrl]
+  );
+
+  const prefetchSongUrls = useCallback(
+    async (songs: Song[]) => {
+      await Promise.all(
+        songs.map(async (song) => {
           try {
-            const url = await getSongUrl(song);
-            urlMap.set(song.song_id, url);
+            await getOrCreateSongUrl(song);
           } catch (err) {
-            console.error(`Failed to create URL for song ${song.song_id}:`, err);
+            console.error(
+              `Failed to create URL for song ${song.song_id}:`,
+              err
+            );
           }
+        })
+      );
+    },
+    [getOrCreateSongUrl]
+  );
+
+  const syncSongUrls = useCallback((songs: Song[]) => {
+    const ids = new Set(
+      songs.map((song) => song.song_id).filter((id): id is number => !!id)
+    );
+    setSongUrls((prev) => {
+      const next = new Map(prev);
+      for (const [songId, url] of next.entries()) {
+        if (!ids.has(songId)) {
+          revokeSongUrl(url);
+          next.delete(songId);
         }
       }
-      setSongUrls(new Map(urlMap));
-    };
+      songUrlsRef.current = next;
+      return next;
+    });
+  }, []);
 
-    createUrls();
-
-    // Cleanup: revoke object URLs when component unmounts or songs change
+  useEffect(() => {
     return () => {
-      urlMap.forEach(url => revokeSongUrl(url));
+      songUrlsRef.current.forEach((url) => revokeSongUrl(url));
     };
-  }, [songs]);
+  }, []);
 
-  const getUrl = (songId: number | undefined): string | null => {
-    if (!songId) return null;
-    return songUrls.get(songId) || null;
+  return {
+    songUrls,
+    getOrCreateSongUrl,
+    prefetchSongUrls,
+    syncSongUrls,
   };
-
-  const ensureUrl = async (song: Song): Promise<string> => {
-    if (!song.song_id) throw new Error('Song has no ID');
-    const existing = songUrls.get(song.song_id);
-    if (existing) return existing;
-    
-    const url = await getSongUrl(song);
-    setSongUrls(prev => new Map(prev).set(song.song_id!, url));
-    return url;
-  };
-
-  return { songUrls, getUrl, ensureUrl };
-}
-
-
+};

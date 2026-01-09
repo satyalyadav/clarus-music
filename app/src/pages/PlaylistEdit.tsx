@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
+import { useSongUrls } from "../hooks/useSongUrls";
 import {
   playlistService,
   getSongsWithRelations,
-  getSongUrl,
   Song,
 } from "../services/db";
+import { createTrackFromSong } from "../utils/trackUtils";
+import { getErrorMessage } from "../utils/errorUtils";
 
 interface SongItem extends Song {
   artist_name?: string;
@@ -29,6 +31,7 @@ const PlaylistEdit: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const { addToQueue } = useAudioPlayer();
+  const { getOrCreateSongUrl } = useSongUrls();
 
   useEffect(() => {
     const loadData = async () => {
@@ -95,20 +98,13 @@ const PlaylistEdit: React.FC = () => {
 
   const handleAddToQueue = async (song: SongItem) => {
     try {
-      const songUrl = await getSongUrl(song);
-      addToQueue({
-        url: songUrl,
-        title: song.title,
-        artist: song.artist_name || "",
-        album: song.album_title || "",
-        cover: song.cover_image || "",
-        songId: song.song_id,
-      });
+      const songUrl = await getOrCreateSongUrl(song);
+      addToQueue(createTrackFromSong(song, songUrl));
     } catch (err) {
       console.error("Error adding song to queue:", err);
       alert(
         `Failed to add to queue: ${
-          err instanceof Error ? err.message : "Unknown error"
+          getErrorMessage(err, "Unknown error")
         }`
       );
     }
