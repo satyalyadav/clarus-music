@@ -20,7 +20,6 @@ const SearchResults: React.FC = () => {
   const {
     playTrack,
     currentTrack,
-    isPlaying,
     setQueue,
     togglePlayPause,
     addToQueue,
