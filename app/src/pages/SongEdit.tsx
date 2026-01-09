@@ -17,13 +17,6 @@ interface Artist {
   name: string;
 }
 
-interface Song {
-  song_id?: number;
-  title: string;
-  album_id?: number | null;
-  artist_id?: number;
-}
-
 const SongEdit: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();

@@ -15,12 +15,6 @@ interface SongItem extends Song {
   album_title?: string;
 }
 
-interface Playlist {
-  playlist_id?: number;
-  title: string;
-  songs: SongItem[];
-}
-
 const PlaylistEdit: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -180,7 +174,7 @@ const PlaylistEdit: React.FC = () => {
                     </button>
                     <button
                       className="btn btn-small btn-danger"
-                      onClick={() => handleRemoveSong(song.song_id)}
+                      onClick={() => song.song_id && handleRemoveSong(song.song_id)}
                     >
                       remove
                     </button>
@@ -216,7 +210,7 @@ const PlaylistEdit: React.FC = () => {
                     </button>
                     <button
                       className="btn btn-small btn-primary"
-                      onClick={() => handleAddSong(song.song_id)}
+                      onClick={() => song.song_id && handleAddSong(song.song_id)}
                       disabled={adding}
                     >
                       add

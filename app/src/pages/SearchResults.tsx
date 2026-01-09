@@ -195,7 +195,6 @@ const SearchResults: React.FC = () => {
                 const song = result.song;
                 const isCurrent = (song.song_id && currentTrack?.songId === song.song_id) ||
                                  (song.song_id && songUrls.get(song.song_id) && currentTrack?.url === songUrls.get(song.song_id));
-                const isCurrentPlaying = isCurrent && isPlaying;
 
                 return (
                   <div

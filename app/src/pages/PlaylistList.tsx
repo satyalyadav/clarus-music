@@ -101,7 +101,7 @@ const PlaylistList: React.FC = () => {
               <div className="grid-item-content">
                 <div className="grid-item-title">{playlist.title}</div>
                 <div className="grid-item-subtitle">
-                  {new Date(playlist.date_created).toLocaleDateString()}
+                  {playlist.date_created ? new Date(playlist.date_created).toLocaleDateString() : ''}
                 </div>
                 <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
                   <button
@@ -115,7 +115,7 @@ const PlaylistList: React.FC = () => {
                   </button>
                   <button
                     className="btn btn-small btn-danger"
-                    onClick={(e) => handleDelete(playlist.playlist_id, e)}
+                    onClick={(e) => playlist.playlist_id && handleDelete(playlist.playlist_id, e)}
                   >
                     delete
                   </button>
