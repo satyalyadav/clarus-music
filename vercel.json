@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "buildCommand": "cd app/backend && npm install && cd ../.. && cd app && npm install && npm run build",
+  "outputDirectory": "app/dist",
+  "installCommand": "cd api && npm install",
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api"
+    }
+  ],
+  "functions": {
+    "api/index.js": {
+      "runtime": "nodejs20.x"
+    }
+  }
+}
