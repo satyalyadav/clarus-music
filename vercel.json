@@ -2,17 +2,5 @@
   "version": 2,
   "buildCommand": "npm install && npm run build",
   "outputDirectory": "dist",
-  "installCommand": "if [ -f api/package.json ]; then cd api && npm install; fi",
-  "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/api"
-    }
-  ],
-  "functions": {
-    "api/index.js": {
-      "runtime": "nodejs20.x",
-      "includeFiles": "app/backend/**"
-    }
-  }
+  "installCommand": "if [ -f api/package.json ]; then cd api && npm install; fi"
 }
