@@ -2,5 +2,11 @@
   "version": 2,
   "buildCommand": "npm install && npm run build",
   "outputDirectory": "dist",
-  "installCommand": "if [ -f app/api/package.json ]; then cd app/api && npm install; fi"
+  "installCommand": "if [ -f app/api/package.json ]; then cd app/api && npm install; fi",
+  "rewrites": [
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ]
 }
