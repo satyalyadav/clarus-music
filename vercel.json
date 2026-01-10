@@ -5,7 +5,7 @@
   "installCommand": "if [ -f app/api/package.json ]; then cd app/api && npm install; fi",
   "rewrites": [
     {
-      "source": "/((?!api/).*)",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
