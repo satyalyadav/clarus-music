@@ -12,6 +12,7 @@
   "dependencies": {
     "axios": "^1.9.0",
     "dexie": "^4.2.1",
+    "music-metadata": "^11.10.5",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.5.2"

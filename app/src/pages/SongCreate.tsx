@@ -70,7 +70,7 @@ const SongCreate = (): React.ReactElement => {
   const [fileMetadata, setFileMetadata] = useState<
     Map<
       number,
-      { duration: string; objectUrl: string; durationSeconds: number }
+      { duration: string; objectUrl: string; durationSeconds: number; coverArt?: string }
     >
   >(new Map());
   const [playingFileIndex, setPlayingFileIndex] = useState<number | null>(null);
@@ -171,12 +171,13 @@ const SongCreate = (): React.ReactElement => {
     // Extract metadata for all files
     const metadataMap = new Map<
       number,
-      { duration: string; objectUrl: string; durationSeconds: number }
+      { duration: string; objectUrl: string; durationSeconds: number; coverArt?: string }
     >();
 
     for (let i = 0; i < fileArray.length; i++) {
       const file = fileArray[i];
       const objectUrl = URL.createObjectURL(file);
+      let coverArt: string | undefined;
 
       try {
         const audio = new Audio();
@@ -199,10 +200,29 @@ const SongCreate = (): React.ReactElement => {
           audio.addEventListener("error", reject);
         });
 
+        // Try to extract cover art from ID3 tags
+        try {
+          const { parseBuffer } = await import("music-metadata");
+          const arrayBuffer = await file.arrayBuffer();
+          const metadata = await parseBuffer(new Uint8Array(arrayBuffer));
+          
+          if (metadata.common.picture && metadata.common.picture.length > 0) {
+            const picture = metadata.common.picture[0];
+            const base64String = String.fromCharCode(...picture.data);
+            const base64 = btoa(base64String);
+            const format = picture.format || "image/jpeg";
+            coverArt = `data:${format};base64,${base64}`;
+          }
+        } catch (coverArtError) {
+          // Ignore cover art extraction errors
+          console.debug(`No cover art found for ${file.name}`);
+        }
+
         metadataMap.set(i, {
           duration: durationStr,
           objectUrl,
           durationSeconds,
+          coverArt,
         });
       } catch (err) {
         console.error(`Error extracting duration for file ${file.name}:`, err);
@@ -212,6 +232,7 @@ const SongCreate = (): React.ReactElement => {
           duration: "00:00:00",
           objectUrl,
           durationSeconds: 0,
+          coverArt,
         });
       }
     }
@@ -229,6 +250,10 @@ const SongCreate = (): React.ReactElement => {
       const firstMetadata = metadataMap.get(0);
       if (firstMetadata) {
         setDuration(firstMetadata.duration);
+        // Set cover image from embedded cover art if available
+        if (firstMetadata.coverArt) {
+          setCoverImage(firstMetadata.coverArt);
+        }
       }
     }
   };
@@ -365,7 +390,8 @@ const SongCreate = (): React.ReactElement => {
       setTitle(savedState.title);
       setAlbumId(savedState.albumId);
       setArtistId(savedState.artistId);
-      setCoverImage(savedState.coverImage);
+      // Use saved cover image, or fall back to embedded cover art if no saved image
+      setCoverImage(savedState.coverImage || metadata?.coverArt || "");
       setSelectedArtistIds(savedState.selectedArtistIds);
       setSearchQuery(savedState.searchQuery);
       setSearchResults(savedState.searchResults);
@@ -387,7 +413,8 @@ const SongCreate = (): React.ReactElement => {
       setTitle("");
       setAlbumId("");
       setArtistId("");
-      setCoverImage("");
+      // Use embedded cover art if available
+      setCoverImage(metadata?.coverArt || "");
       setSelectedArtistIds([]);
       setSearchQuery("");
       setSearchResults([]);
@@ -401,6 +428,122 @@ const SongCreate = (): React.ReactElement => {
       });
     }
     setError(null);
+  };
+
+  // Handle removing a file from the list
+  const handleRemoveFile = (index: number, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+
+    // Stop playback if this file is playing
+    if (playingFileIndex === index && previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+      setPlayingFileIndex(null);
+    }
+
+    // Clean up object URL
+    const metadata = fileMetadata.get(index);
+    if (metadata) {
+      URL.revokeObjectURL(metadata.objectUrl);
+    }
+
+    // Remove the file from arrays and maps
+    const newFiles = files.filter((_, i) => i !== index);
+    setFiles(newFiles);
+
+    // Rebuild metadata map with new indices
+    const newMetadata = new Map<
+      number,
+      { duration: string; objectUrl: string; durationSeconds: number; coverArt?: string }
+    >();
+    const newFileFormStates = new Map<number, FileFormState>();
+    const newIncompleteFiles = new Set<number>();
+    const newPlaybackTimes = new Map<number, number>();
+
+    newFiles.forEach((file, newIndex) => {
+      // Map new index to old index: if newIndex < removed index, no change; otherwise shift up by 1
+      const oldIndex = newIndex < index ? newIndex : newIndex + 1;
+      const oldMetadata = fileMetadata.get(oldIndex);
+      const oldState = fileFormStates.get(oldIndex);
+      const oldPlaybackTime = playbackTimes.get(oldIndex);
+
+      if (oldMetadata) {
+        newMetadata.set(newIndex, oldMetadata);
+      }
+      if (oldState) {
+        newFileFormStates.set(newIndex, oldState);
+      }
+      if (incompleteFiles.has(oldIndex)) {
+        newIncompleteFiles.add(newIndex);
+      }
+      if (oldPlaybackTime !== undefined) {
+        newPlaybackTimes.set(newIndex, oldPlaybackTime);
+      }
+    });
+
+    setFileMetadata(newMetadata);
+    setFileFormStates(newFileFormStates);
+    setIncompleteFiles(newIncompleteFiles);
+    setPlaybackTimes(newPlaybackTimes);
+
+    // Handle current file index
+    if (newFiles.length === 0) {
+      // No files left, reset everything
+      setCurrentFileIndex(null);
+      setFile(null);
+      setTitle("");
+      setAlbumId("");
+      setArtistId("");
+      setCoverImage("");
+      setSelectedArtistIds([]);
+      setDuration("");
+    } else {
+      // Adjust current file index
+      let newCurrentIndex = currentFileIndex;
+      if (currentFileIndex === index) {
+        // If we removed the current file, switch to the next one (or previous if it was the last)
+        newCurrentIndex = index < newFiles.length ? index : newFiles.length - 1;
+      } else if (currentFileIndex !== null && currentFileIndex > index) {
+        // If we removed a file before the current one, decrement the index
+        newCurrentIndex = currentFileIndex - 1;
+      }
+
+      setCurrentFileIndex(newCurrentIndex);
+      if (newCurrentIndex !== null) {
+        setFile(newFiles[newCurrentIndex]);
+        const currentMetadata = newMetadata.get(newCurrentIndex);
+        if (currentMetadata) {
+          setDuration(currentMetadata.duration);
+        }
+
+        // Restore form state for the new current file
+        const savedState = newFileFormStates.get(newCurrentIndex);
+        if (savedState) {
+          setTitle(savedState.title);
+          setAlbumId(savedState.albumId);
+          setArtistId(savedState.artistId);
+          // Use saved cover image, or fall back to embedded cover art if no saved image
+          setCoverImage(savedState.coverImage || currentMetadata?.coverArt || "");
+          setSelectedArtistIds(savedState.selectedArtistIds);
+          setSearchQuery(savedState.searchQuery);
+          setSearchResults(savedState.searchResults);
+          setShowResults(savedState.showResults);
+        } else {
+          setTitle("");
+          setAlbumId("");
+          setArtistId("");
+          // Use embedded cover art if available
+          setCoverImage(currentMetadata?.coverArt || "");
+          setSelectedArtistIds([]);
+          setSearchQuery("");
+          setSearchResults([]);
+          setShowResults(false);
+        }
+      }
+    }
   };
 
   // Handle progress bar seek
@@ -2718,6 +2861,19 @@ const SongCreate = (): React.ReactElement => {
                           >
                             {index + 1}
                           </div>
+                          {metadata?.coverArt && (
+                            <img
+                              src={metadata.coverArt}
+                              alt="Cover art"
+                              style={{
+                                width: "40px",
+                                height: "40px",
+                                objectFit: "cover",
+                                borderRadius: "4px",
+                                flexShrink: 0,
+                              }}
+                            />
+                          )}
                           <div
                             style={{
                               flex: 1,
@@ -2796,6 +2952,30 @@ const SongCreate = (): React.ReactElement => {
                             }}
                           >
                             {isPlaying ? "⏸ pause" : "▶ play"}
+                          </button>
+                          <button
+                            className="btn btn-small btn-danger"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              handleRemoveFile(index, e);
+                            }}
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                            }}
+                            style={{
+                              minWidth: "32px",
+                              width: "32px",
+                              padding: "4px 10px",
+                              pointerEvents: "auto",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: "18px",
+                              lineHeight: "1",
+                            }}
+                          >
+                            ×
                           </button>
                         </div>
 
