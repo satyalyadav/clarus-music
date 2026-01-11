@@ -463,7 +463,7 @@ const SongCreate = (): React.ReactElement => {
     const newIncompleteFiles = new Set<number>();
     const newPlaybackTimes = new Map<number, number>();
 
-    newFiles.forEach((file, newIndex) => {
+    for (let newIndex = 0; newIndex < newFiles.length; newIndex++) {
       // Map new index to old index: if newIndex < removed index, no change; otherwise shift up by 1
       const oldIndex = newIndex < index ? newIndex : newIndex + 1;
       const oldMetadata = fileMetadata.get(oldIndex);
@@ -482,7 +482,7 @@ const SongCreate = (): React.ReactElement => {
       if (oldPlaybackTime !== undefined) {
         newPlaybackTimes.set(newIndex, oldPlaybackTime);
       }
-    });
+    }
 
     setFileMetadata(newMetadata);
     setFileFormStates(newFileFormStates);
