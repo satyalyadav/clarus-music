@@ -28,6 +28,7 @@ interface SpotifyArtist {
   id: string;
   name: string;
   images: SpotifyImage[];
+  popularity?: number;
   external_urls?: {
     spotify?: string;
   };
@@ -37,6 +38,56 @@ interface SpotifySearchResponse {
   artists: {
     items: SpotifyArtist[];
   };
+}
+
+function normalizeArtistName(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+
+  const matrix = Array.from({ length: a.length + 1 }, () =>
+    new Array(b.length + 1).fill(0)
+  );
+
+  for (let i = 0; i <= a.length; i += 1) {
+    matrix[i][0] = i;
+  }
+  for (let j = 0; j <= b.length; j += 1) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i <= a.length; i += 1) {
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      );
+    }
+  }
+
+  return matrix[a.length][b.length];
+}
+
+function pickBestArtist(
+  candidates: Array<{ artist: SpotifyArtist }>
+): SpotifyArtist | null {
+  if (candidates.length === 0) return null;
+  return candidates
+    .slice()
+    .sort(
+      (a, b) =>
+        (b.artist.popularity ?? 0) - (a.artist.popularity ?? 0)
+    )[0].artist;
 }
 
 class SpotifyService {
@@ -105,9 +156,12 @@ class SpotifyService {
         return null;
       }
 
-      const searchUrl = `https://api.spotify.com/v1/search?q=${encodeURIComponent(artistName)}&type=artist&limit=1`;
+      const searchUrl = new URL("https://api.spotify.com/v1/search");
+      searchUrl.searchParams.append("q", artistName);
+      searchUrl.searchParams.append("type", "artist");
+      searchUrl.searchParams.append("limit", "10");
       
-      const response = await fetch(searchUrl, {
+      const response = await fetch(searchUrl.toString(), {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -130,8 +184,65 @@ class SpotifyService {
       const data: SpotifySearchResponse = await response.json();
       const artists = data.artists?.items || [];
       
-      if (artists.length > 0) {
-        return artists[0];
+      if (artists.length === 0) {
+        return null;
+      }
+
+      const normalizedQuery = normalizeArtistName(artistName.trim());
+      const normalizedArtists = artists.map((artist) => ({
+        artist,
+        normalized: normalizeArtistName(artist.name || ""),
+      }));
+      const normalizedCandidates = normalizedArtists.filter(
+        (entry) => entry.normalized.length > 0
+      );
+      const nonLatinCandidates = normalizedArtists.filter(
+        (entry) => entry.normalized.length === 0
+      );
+
+      const exactMatches = normalizedCandidates.filter(
+        (entry) => entry.normalized === normalizedQuery
+      );
+      const exactMatch = pickBestArtist(exactMatches);
+      if (exactMatch) {
+        return exactMatch;
+      }
+
+      const partialMatches = normalizedCandidates.filter(
+        (entry) =>
+          entry.normalized.includes(normalizedQuery) ||
+          normalizedQuery.includes(entry.normalized)
+      );
+      const partialMatch = pickBestArtist(partialMatches);
+      if (partialMatch) {
+        return partialMatch;
+      }
+
+      if (normalizedQuery.length > 0 && normalizedCandidates.length > 0) {
+        const scored = normalizedCandidates.map((entry) => ({
+          artist: entry.artist,
+          distance: levenshteinDistance(normalizedQuery, entry.normalized),
+        }));
+        scored.sort(
+          (a, b) =>
+            a.distance - b.distance ||
+            (b.artist.popularity ?? 0) - (a.artist.popularity ?? 0)
+        );
+
+        const best = scored[0];
+        const maxDistance = normalizedQuery.length <= 6 ? 1 : 2;
+        if (best && best.distance <= maxDistance) {
+          return best.artist;
+        }
+      }
+
+      const nonLatinFallback = pickBestArtist(nonLatinCandidates);
+      if (nonLatinFallback) {
+        return nonLatinFallback;
+      }
+
+      if (normalizedCandidates.length === 0) {
+        return artists[0] || null;
       }
 
       return null;
