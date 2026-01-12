@@ -1,10 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useAudioPlayer } from "../hooks/useAudioPlayer";
-import { useSongUrls } from "../hooks/useSongUrls";
 import { playlistService, getSongsWithRelations, Song } from "../services/db";
-import { createTrackFromSong } from "../utils/trackUtils";
-import { getErrorMessage } from "../utils/errorUtils";
 
 interface SongItem extends Song {
   artist_name?: string;
@@ -21,8 +17,6 @@ const PlaylistEdit: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const { addToQueue } = useAudioPlayer();
-  const { getOrCreateSongUrl } = useSongUrls();
 
   useEffect(() => {
     const loadData = async () => {
@@ -95,16 +89,6 @@ const PlaylistEdit: React.FC = () => {
       setPlaylistSongs((prev) => prev.filter((s) => s.song_id !== songId));
     } catch (err: any) {
       alert(err.message || "Failed to remove song");
-    }
-  };
-
-  const handleAddToQueue = async (song: SongItem) => {
-    try {
-      const songUrl = await getOrCreateSongUrl(song);
-      addToQueue(createTrackFromSong(song, songUrl));
-    } catch (err) {
-      console.error("Error adding song to queue:", err);
-      alert(`Failed to add to queue: ${getErrorMessage(err, "Unknown error")}`);
     }
   };
 
@@ -185,12 +169,6 @@ const PlaylistEdit: React.FC = () => {
                   </div>
                   <div className="list-item-actions">
                     <button
-                      className="btn btn-small"
-                      onClick={() => handleAddToQueue(song)}
-                    >
-                      queue
-                    </button>
-                    <button
                       className="btn btn-small btn-danger"
                       onClick={() =>
                         song.song_id && handleRemoveSong(song.song_id)
@@ -239,12 +217,6 @@ const PlaylistEdit: React.FC = () => {
                         </div>
                       </div>
                       <div className="list-item-actions">
-                        <button
-                          className="btn btn-small"
-                          onClick={() => handleAddToQueue(song)}
-                        >
-                          queue
-                        </button>
                         <button
                           className="btn btn-small btn-primary"
                           onClick={() =>

@@ -533,6 +533,15 @@ body {
   border-color: var(--accent-color);
 }
 
+.list-item.dragging {
+  opacity: 0.5;
+  cursor: grabbing !important;
+}
+
+.list-item.drag-over {
+  background: var(--button-hover) !important;
+}
+
 .list-item-content {
   flex: 1;
   min-width: 0;

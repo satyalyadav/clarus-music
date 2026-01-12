@@ -385,7 +385,14 @@ export const playlistService = {
     const songIds = playlistSongIds.map((ps: PlaylistSong) => ps.song_id);
     if (songIds.length === 0) return [];
 
-    return await db.songs.where("song_id").anyOf(songIds).toArray();
+    // Fetch all songs and create a map for quick lookup
+    const allSongs = await db.songs.where("song_id").anyOf(songIds).toArray();
+    const songMap = new Map(allSongs.map((s) => [s.song_id, s]));
+
+    // Return songs in the same order as playlistSongIds
+    return songIds
+      .map((id) => songMap.get(id))
+      .filter((song): song is Song => song !== undefined);
   },
 
   async addSong(playlistId: number, songId: number): Promise<void> {

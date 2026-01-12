@@ -28,6 +28,8 @@ const PlaylistDetail: React.FC = () => {
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const { playTrack, currentTrack, setQueue, togglePlayPause, addToQueue } =
     useAudioPlayer();
   const { getOrCreateSongUrl } = useSongUrls();
@@ -155,6 +157,68 @@ const PlaylistDetail: React.FC = () => {
     }
   };
 
+  const movePlaylistSong = async (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || !playlist || !id) return;
+    
+    const playlistId = parseInt(id);
+    const newSongs = [...playlist.songs];
+    const [moved] = newSongs.splice(fromIndex, 1);
+    newSongs.splice(toIndex, 0, moved);
+    
+    // Update local state immediately for responsive UI
+    setPlaylist({ ...playlist, songs: newSongs });
+    
+    // Save new order to database
+    try {
+      const songIds = newSongs
+        .map((s) => s.song_id)
+        .filter((id): id is number => id !== undefined);
+      await playlistService.setSongs(playlistId, songIds);
+    } catch (err: any) {
+      // Revert on error
+      fetchPlaylist();
+      alert(err.message || "Failed to reorder songs");
+    }
+  };
+
+  const handleDragStart = (
+    e: React.DragEvent<HTMLDivElement>,
+    index: number
+  ) => {
+    setDragIndex(index);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", index.toString());
+  };
+
+  const handleDragOver = (
+    e: React.DragEvent<HTMLDivElement>,
+    index: number
+  ) => {
+    e.preventDefault();
+    setDragOverIndex(index);
+  };
+
+  const handleDrop = (
+    e: React.DragEvent<HTMLDivElement>,
+    index: number
+  ) => {
+    e.preventDefault();
+    const fromIndex =
+      dragIndex !== null
+        ? dragIndex
+        : Number.parseInt(e.dataTransfer.getData("text/plain"), 10);
+    if (!Number.isNaN(fromIndex)) {
+      movePlaylistSong(fromIndex, index);
+    }
+    setDragIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDragIndex(null);
+    setDragOverIndex(null);
+  };
+
   if (loading) return <div className="loading">Loading playlist...</div>;
   if (error) return <div className="error">Error: {error}</div>;
   if (!playlist) return <div className="error">Playlist not found</div>;
@@ -254,14 +318,33 @@ const PlaylistDetail: React.FC = () => {
               (song.song_id && currentTrack?.songId === song.song_id) ||
               (currentTrack?.title === song.title &&
                 currentTrack?.artist === (song.artist_name || ""));
+            const isDragging = dragIndex === index;
+            const isDragOver = dragOverIndex === index;
 
             return (
               <div
                 key={song.song_id}
-                className="list-item"
-                onClick={() =>
-                  isCurrent ? togglePlayPause() : handlePlaySong(song)
-                }
+                className={`list-item${isDragging ? " dragging" : ""}${
+                  isDragOver ? " drag-over" : ""
+                }`}
+                draggable
+                onDragStart={(e) => handleDragStart(e, index)}
+                onDragOver={(e) => handleDragOver(e, index)}
+                onDrop={(e) => handleDrop(e, index)}
+                onDragEnd={handleDragEnd}
+                onClick={() => {
+                  if (dragIndex === null) {
+                    isCurrent ? togglePlayPause() : handlePlaySong(song);
+                  }
+                }}
+                style={{
+                  cursor: isDragging ? "grabbing" : "grab",
+                  opacity: isDragging ? 0.5 : 1,
+                  backgroundColor: isDragOver
+                    ? "var(--button-hover)"
+                    : undefined,
+                  transition: "background-color 0.2s ease",
+                }}
               >
                 <span
                   style={{
@@ -290,6 +373,13 @@ const PlaylistDetail: React.FC = () => {
                   }}
                 >
                   {formatDuration(song.duration)}
+                </span>
+                <span
+                  className="queue-drag-handle"
+                  aria-hidden="true"
+                  style={{ marginRight: "8px" }}
+                >
+                  :::
                 </span>
                 <div
                   className="list-item-actions"
