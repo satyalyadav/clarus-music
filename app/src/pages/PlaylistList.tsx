@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { playlistService } from "../services/db";
+import { playlistService, getSongsWithRelations } from "../services/db";
+import { PlaylistCover } from "../utils/playlistCover";
 
 interface Playlist {
   playlist_id?: number;
@@ -9,17 +10,37 @@ interface Playlist {
   date_created?: string;
 }
 
+interface PlaylistWithSongs extends Playlist {
+  songs: any[];
+}
+
 const PlaylistList: React.FC = () => {
   const navigate = useNavigate();
-  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [playlists, setPlaylists] = useState<PlaylistWithSongs[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchPlaylists = async () => {
     setLoading(true);
     try {
-      const playlists = await playlistService.getAll();
-      setPlaylists(playlists);
+      const playlistsData = await playlistService.getAll();
+      const allSongs = await getSongsWithRelations();
+      
+      // Fetch songs for each playlist and create enriched playlists
+      const playlistsWithSongs = await Promise.all(
+        playlistsData.map(async (playlist) => {
+          if (!playlist.playlist_id) return { ...playlist, songs: [] };
+          const playlistSongs = await playlistService.getSongs(playlist.playlist_id);
+          // Enrich with relations
+          const enrichedSongs = playlistSongs.map((song) => {
+            const enriched = allSongs.find((s) => s.song_id === song.song_id);
+            return enriched || song;
+          });
+          return { ...playlist, songs: enrichedSongs };
+        })
+      );
+      
+      setPlaylists(playlistsWithSongs);
       setError(null);
     } catch (err: any) {
       setError(err.message);
@@ -79,25 +100,9 @@ const PlaylistList: React.FC = () => {
               className="grid-item"
               onClick={() => navigate(`/playlists/${playlist.playlist_id}`)}
             >
-              {playlist.cover_image ? (
-                <img
-                  src={playlist.cover_image}
-                  alt={playlist.title}
-                  className="grid-item-image"
-                />
-              ) : (
-                <div
-                  className="grid-item-image"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: "48px",
-                  }}
-                >
-                  🎶
-                </div>
-              )}
+              <div className="grid-item-image" style={{ padding: 0, overflow: "hidden", borderRadius: "8px 8px 0 0" }}>
+                <PlaylistCover songs={playlist.songs} fillContainer={true} />
+              </div>
               <div className="grid-item-content">
                 <div className="grid-item-title">{playlist.title}</div>
                 <div className="grid-item-subtitle">

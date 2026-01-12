@@ -464,6 +464,7 @@ export async function getSongsWithRelations(): Promise<SongWithRelations[]> {
 
   const artistMap = new Map(artists.map((a) => [a.artist_id, a.name]));
   const albumMap = new Map(albums.map((a) => [a.album_id, a.title]));
+  const albumCoverMap = new Map(albums.map((a) => [a.album_id, a.cover_image]));
 
   // Load song-artist mappings for all songs in one go
   const songIds = songs
@@ -522,6 +523,7 @@ export async function getSongsWithRelations(): Promise<SongWithRelations[]> {
         : artistMap.get(song.artist_id);
     })(),
     album_title: song.album_id ? albumMap.get(song.album_id) : undefined,
+    album_cover_image: song.album_id ? albumCoverMap.get(song.album_id) || null : null,
   }));
 }
 

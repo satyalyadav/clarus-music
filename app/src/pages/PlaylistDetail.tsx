@@ -13,6 +13,7 @@ import { formatDuration } from "../utils/formatDuration";
 import { getErrorMessage } from "../utils/errorUtils";
 import { playQueueFromIndex, playQueueFromStart } from "../utils/queuePlayback";
 import { buildTracksFromSongs, createTrackFromSong } from "../utils/trackUtils";
+import { PlaylistCover } from "../utils/playlistCover";
 
 interface Playlist {
   playlist_id?: number;
@@ -54,6 +55,9 @@ const PlaylistDetail: React.FC = () => {
           artistsData.map((a) => [a.artist_id, a.name])
         );
         const albumMap = new Map(albumsData.map((a) => [a.album_id, a.title]));
+        const albumCoverMap = new Map(
+          albumsData.map((a) => [a.album_id, a.cover_image])
+        );
 
         const songsWithRelations: SongWithRelations[] = await Promise.all(
           songsData.map(async (song) => {
@@ -80,6 +84,9 @@ const PlaylistDetail: React.FC = () => {
               album_title: song.album_id
                 ? albumMap.get(song.album_id)
                 : undefined,
+              album_cover_image: song.album_id
+                ? albumCoverMap.get(song.album_id) || null
+                : null,
             };
           })
         );
@@ -234,33 +241,7 @@ const PlaylistDetail: React.FC = () => {
       </button>
 
       <div style={{ display: "flex", gap: "24px", marginBottom: "32px" }}>
-        {playlist.cover_image ? (
-          <img
-            src={playlist.cover_image}
-            alt={playlist.title}
-            style={{
-              width: "200px",
-              height: "200px",
-              objectFit: "cover",
-              borderRadius: "8px",
-            }}
-          />
-        ) : (
-          <div
-            style={{
-              width: "200px",
-              height: "200px",
-              background: "var(--card-bg)",
-              borderRadius: "8px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: "80px",
-            }}
-          >
-            🎶
-          </div>
-        )}
+        <PlaylistCover songs={playlist.songs} size={200} />
         <div>
           <h1 className="section-title" style={{ marginBottom: "16px" }}>
             {playlist.title}
