@@ -2,11 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { useSongUrls } from "../hooks/useSongUrls";
-import {
-  playlistService,
-  getSongsWithRelations,
-  Song,
-} from "../services/db";
+import { playlistService, getSongsWithRelations, Song } from "../services/db";
 import { createTrackFromSong } from "../utils/trackUtils";
 import { getErrorMessage } from "../utils/errorUtils";
 
@@ -24,6 +20,7 @@ const PlaylistEdit: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const { addToQueue } = useAudioPlayer();
   const { getOrCreateSongUrl } = useSongUrls();
 
@@ -35,11 +32,18 @@ const PlaylistEdit: React.FC = () => {
         playlistService.getById(playlistId),
         getSongsWithRelations(),
       ]);
-      
+
       if (playlist) {
         setTitle(playlist.title);
         const playlistSongsData = await playlistService.getSongs(playlistId);
-        setPlaylistSongs(playlistSongsData);
+        // Enrich playlist songs with artist/album info from allSongs
+        const enrichedPlaylistSongs = playlistSongsData.map((song) => {
+          const enrichedSong = allSongsData.find(
+            (s) => s.song_id === song.song_id
+          );
+          return enrichedSong || song;
+        });
+        setPlaylistSongs(enrichedPlaylistSongs);
       }
       setAllSongs(allSongsData);
     };
@@ -69,9 +73,13 @@ const PlaylistEdit: React.FC = () => {
       if (!id) return;
       const playlistId = parseInt(id);
       await playlistService.addSong(playlistId, songId);
-      // Refresh playlist songs
+      // Refresh playlist songs and enrich with artist/album info
       const playlistSongsData = await playlistService.getSongs(playlistId);
-      setPlaylistSongs(playlistSongsData);
+      const enrichedPlaylistSongs = playlistSongsData.map((song) => {
+        const enrichedSong = allSongs.find((s) => s.song_id === song.song_id);
+        return enrichedSong || song;
+      });
+      setPlaylistSongs(enrichedPlaylistSongs);
     } catch (err: any) {
       alert(err.message || "Failed to add song");
     } finally {
@@ -96,18 +104,28 @@ const PlaylistEdit: React.FC = () => {
       addToQueue(createTrackFromSong(song, songUrl));
     } catch (err) {
       console.error("Error adding song to queue:", err);
-      alert(
-        `Failed to add to queue: ${
-          getErrorMessage(err, "Unknown error")
-        }`
-      );
+      alert(`Failed to add to queue: ${getErrorMessage(err, "Unknown error")}`);
     }
   };
 
-  const playlistSongIds = new Set(playlistSongs.map((s) => s.song_id).filter((id): id is number => id !== undefined));
+  const playlistSongIds = new Set(
+    playlistSongs
+      .map((s) => s.song_id)
+      .filter((id): id is number => id !== undefined)
+  );
   const availableSongs = allSongs.filter(
     (s) => s.song_id && !playlistSongIds.has(s.song_id)
   );
+
+  // Filter available songs based on search query
+  const filteredAvailableSongs = availableSongs.filter((song) => {
+    if (!searchQuery.trim()) return true;
+    const query = searchQuery.toLowerCase();
+    const titleMatch = song.title?.toLowerCase().includes(query);
+    const artistMatch = song.artist_name?.toLowerCase().includes(query);
+    const albumMatch = song.album_title?.toLowerCase().includes(query);
+    return titleMatch || artistMatch || albumMatch;
+  });
 
   return (
     <div>
@@ -174,7 +192,9 @@ const PlaylistEdit: React.FC = () => {
                     </button>
                     <button
                       className="btn btn-small btn-danger"
-                      onClick={() => song.song_id && handleRemoveSong(song.song_id)}
+                      onClick={() =>
+                        song.song_id && handleRemoveSong(song.song_id)
+                      }
                     >
                       remove
                     </button>
@@ -187,38 +207,59 @@ const PlaylistEdit: React.FC = () => {
 
         <div>
           <h3 style={{ marginBottom: "16px", color: "var(--text-primary)" }}>
-            //available songs ({availableSongs.length})
+            //available songs ({filteredAvailableSongs.length}
+            {searchQuery.trim() ? ` of ${availableSongs.length}` : ""})
           </h3>
           {availableSongs.length === 0 ? (
             <p style={{ color: "var(--text-muted)" }}>All songs added</p>
           ) : (
-            <div className="list">
-              {availableSongs.map((song) => (
-                <div key={song.song_id} className="list-item">
-                  <div className="list-item-content">
-                    <div className="list-item-title">{song.title}</div>
-                    <div className="list-item-subtitle">
-                      {song.artist_name || "Unknown Artist"}
+            <>
+              <div className="form-group" style={{ marginBottom: "16px" }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="search songs, artists, or albums..."
+                  style={{ maxWidth: "100%" }}
+                />
+              </div>
+              {filteredAvailableSongs.length === 0 ? (
+                <p style={{ color: "var(--text-muted)" }}>
+                  No songs found matching "{searchQuery}"
+                </p>
+              ) : (
+                <div className="list">
+                  {filteredAvailableSongs.map((song) => (
+                    <div key={song.song_id} className="list-item">
+                      <div className="list-item-content">
+                        <div className="list-item-title">{song.title}</div>
+                        <div className="list-item-subtitle">
+                          {song.artist_name || "Unknown Artist"}
+                        </div>
+                      </div>
+                      <div className="list-item-actions">
+                        <button
+                          className="btn btn-small"
+                          onClick={() => handleAddToQueue(song)}
+                        >
+                          queue
+                        </button>
+                        <button
+                          className="btn btn-small btn-primary"
+                          onClick={() =>
+                            song.song_id && handleAddSong(song.song_id)
+                          }
+                          disabled={adding}
+                        >
+                          add
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                  <div className="list-item-actions">
-                    <button
-                      className="btn btn-small"
-                      onClick={() => handleAddToQueue(song)}
-                    >
-                      queue
-                    </button>
-                    <button
-                      className="btn btn-small btn-primary"
-                      onClick={() => song.song_id && handleAddSong(song.song_id)}
-                      disabled={adding}
-                    >
-                      add
-                    </button>
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              )}
+            </>
           )}
         </div>
       </div>
