@@ -70,7 +70,12 @@ const SongCreate = (): React.ReactElement => {
   const [fileMetadata, setFileMetadata] = useState<
     Map<
       number,
-      { duration: string; objectUrl: string; durationSeconds: number; coverArt?: string }
+      {
+        duration: string;
+        objectUrl: string;
+        durationSeconds: number;
+        coverArt?: string;
+      }
     >
   >(new Map());
   const [playingFileIndex, setPlayingFileIndex] = useState<number | null>(null);
@@ -91,6 +96,21 @@ const SongCreate = (): React.ReactElement => {
     []
   );
   const [selectedArtistIds, setSelectedArtistIds] = useState<number[]>([]);
+
+  // Pending artist/album names from search results (not created until form submission)
+  const [pendingArtistNames, setPendingArtistNames] = useState<string[]>([]);
+  const [pendingAlbumName, setPendingAlbumName] = useState<string | null>(null);
+  const [pendingAlbumCoverArt, setPendingAlbumCoverArt] = useState<
+    string | null
+  >(null);
+  const [pendingSpotifyArtistIds, setPendingSpotifyArtistIds] = useState<
+    string[]
+  >([]);
+  const [pendingArtistNameToIdMap, setPendingArtistNameToIdMap] = useState<
+    Map<string, string>
+  >(new Map());
+  const [pendingBandcampMetadata, setPendingBandcampMetadata] =
+    useState<any>(null);
 
   // Search functionality
   const [searchQuery, setSearchQuery] = useState("");
@@ -171,7 +191,12 @@ const SongCreate = (): React.ReactElement => {
     // Extract metadata for all files
     const metadataMap = new Map<
       number,
-      { duration: string; objectUrl: string; durationSeconds: number; coverArt?: string }
+      {
+        duration: string;
+        objectUrl: string;
+        durationSeconds: number;
+        coverArt?: string;
+      }
     >();
 
     for (let i = 0; i < fileArray.length; i++) {
@@ -205,7 +230,7 @@ const SongCreate = (): React.ReactElement => {
           const { parseBuffer } = await import("music-metadata");
           const arrayBuffer = await file.arrayBuffer();
           const metadata = await parseBuffer(new Uint8Array(arrayBuffer));
-          
+
           if (metadata.common.picture && metadata.common.picture.length > 0) {
             const picture = metadata.common.picture[0];
             const base64String = String.fromCharCode(...picture.data);
@@ -457,7 +482,12 @@ const SongCreate = (): React.ReactElement => {
     // Rebuild metadata map with new indices
     const newMetadata = new Map<
       number,
-      { duration: string; objectUrl: string; durationSeconds: number; coverArt?: string }
+      {
+        duration: string;
+        objectUrl: string;
+        durationSeconds: number;
+        coverArt?: string;
+      }
     >();
     const newFileFormStates = new Map<number, FileFormState>();
     const newIncompleteFiles = new Set<number>();
@@ -526,7 +556,9 @@ const SongCreate = (): React.ReactElement => {
           setAlbumId(savedState.albumId);
           setArtistId(savedState.artistId);
           // Use saved cover image, or fall back to embedded cover art if no saved image
-          setCoverImage(savedState.coverImage || currentMetadata?.coverArt || "");
+          setCoverImage(
+            savedState.coverImage || currentMetadata?.coverArt || ""
+          );
           setSelectedArtistIds(savedState.selectedArtistIds);
           setSearchQuery(savedState.searchQuery);
           setSearchResults(savedState.searchResults);
@@ -1230,9 +1262,7 @@ const SongCreate = (): React.ReactElement => {
       // Use metadata from Bandcamp if available (more accurate than search results)
       let bandcampArtist = result.artist;
       let bandcampAlbum = result.album;
-      let bandcampArtistImage = result.artistImage;
       let bandcampCoverArt = result.coverArt;
-      let bandcampAlbumArtist: string | null = null; // Album artist (may be "Various Artists" for compilations)
 
       if (isBandcampResult && bandcampMetadata) {
         // Use artist from metadata if available, and clean it
@@ -1244,17 +1274,9 @@ const SongCreate = (): React.ReactElement => {
             .replace(/^from\s+.+?\s+by\s+/i, "")
             .trim();
         }
-        // Use album artist from metadata if available (for compilation albums)
-        if ((bandcampMetadata as any).albumArtist) {
-          bandcampAlbumArtist = (bandcampMetadata as any).albumArtist;
-        }
         // Use album from metadata if available
         if (bandcampMetadata.album) {
           bandcampAlbum = bandcampMetadata.album;
-        }
-        // Use artist image from metadata if available
-        if (bandcampMetadata.artistImage) {
-          bandcampArtistImage = bandcampMetadata.artistImage;
         }
         // Use cover art from metadata if available
         if (bandcampMetadata.coverArt) {
@@ -1299,278 +1321,71 @@ const SongCreate = (): React.ReactElement => {
         }
       }
 
-      const createdArtistsByName = new Map<string, Artist>();
-      const getOrCreateArtist = async (
-        rawName: string
-      ): Promise<Artist | null> => {
-        const trimmedName = rawName.trim();
-        if (!trimmedName) return null;
-        const normalizedName = normalizeArtistName(trimmedName);
-        const existing =
-          createdArtistsByName.get(normalizedName) ||
-          artists.find((a) => normalizeArtistName(a.name) === normalizedName);
-        if (existing) {
-          createdArtistsByName.set(normalizedName, existing);
-          return existing;
-        }
-
-        const newId = await artistService.create({ name: trimmedName });
-        const artist = { artist_id: newId, name: trimmedName };
-        createdArtistsByName.set(normalizedName, artist);
-        setArtists((prev) => [...prev, artist!]);
-        return artist;
-      };
-
+      // Store artist names and album name for later creation (only create on form submission)
       effectiveNames = effectiveNames
         .map((name) => name.trim())
         .filter(Boolean);
 
-      let primaryArtistId: number | null = null;
-      const allArtistIds: number[] = [];
+      // Store pending artist names (will be created on form submission)
+      setPendingArtistNames(effectiveNames);
 
+      // Store Spotify metadata for artist image updates later
+      const spotifyArtistIds: string[] =
+        (result.raw && Array.isArray(result.raw.artistIds)
+          ? result.raw.artistIds
+          : []) || [];
+      setPendingSpotifyArtistIds(spotifyArtistIds);
+
+      const artistNameToIdMap: Map<string, string> =
+        result.raw?.artistNameToIdMap || new Map();
+      setPendingArtistNameToIdMap(artistNameToIdMap);
+
+      // Store Bandcamp metadata if available
+      if (isBandcampResult) {
+        setPendingBandcampMetadata(bandcampMetadata);
+      } else {
+        setPendingBandcampMetadata(null);
+      }
+
+      // Try to find existing artists to pre-select (but don't create new ones)
+      const existingArtistIds: number[] = [];
       for (const name of effectiveNames) {
-        const artist = await getOrCreateArtist(name);
-        if (artist?.artist_id != null) {
-          allArtistIds.push(artist.artist_id);
-          if (primaryArtistId == null) {
-            primaryArtistId = artist.artist_id;
-          }
+        const normalizedName = normalizeArtistName(name);
+        const existing = artists.find(
+          (a) => normalizeArtistName(a.name) === normalizedName
+        );
+        if (existing?.artist_id != null) {
+          existingArtistIds.push(existing.artist_id);
         }
       }
 
-      if (import.meta.env.DEV) {
-        console.log("Created/found artists:", {
-          effectiveNames,
-          allArtistIds,
-          primaryArtistId,
-        });
+      // If we found existing artists, pre-select the first one
+      if (existingArtistIds.length > 0) {
+        setArtistId(existingArtistIds[0].toString());
+        setSelectedArtistIds(existingArtistIds);
+      } else {
+        // No existing artists found - clear selection (will be created on submit)
+        setArtistId("");
+        setSelectedArtistIds([]);
       }
 
-      if (primaryArtistId != null) {
-        setArtistId(primaryArtistId.toString());
-        // Update artist images using Spotify validation if we have Spotify artist IDs
-        const spotifyArtistIds: string[] =
-          (result.raw && Array.isArray(result.raw.artistIds)
-            ? result.raw.artistIds
-            : []) || [];
+      // Store album name for later creation (only create on form submission)
+      if (bandcampAlbum) {
+        setPendingAlbumName(bandcampAlbum);
+        setPendingAlbumCoverArt(bandcampCoverArt || null);
 
-        if (spotifyArtistIds.length > 0) {
-          // Validate and update images for ALL artists, not just the primary one
-          // Match artists by name using the artistNameToIdMap for reliable matching
-          const artistNameToIdMap: Map<string, string> =
-            result.raw?.artistNameToIdMap || new Map();
-
-          const imageUpdatePromises = effectiveNames.map(
-            async (artistName, index) => {
-              const dbArtistId = allArtistIds[index];
-              if (!dbArtistId) return;
-
-              // Try to find Spotify ID by artist name (most reliable)
-              let spotifyArtistId: string | undefined =
-                artistNameToIdMap.get(artistName);
-
-              // Fallback to index-based matching if name lookup fails
-              if (!spotifyArtistId && index < spotifyArtistIds.length) {
-                spotifyArtistId = spotifyArtistIds[index];
-              }
-
-              if (spotifyArtistId) {
-                try {
-                  const validated = await validateAndGetArtistImage(
-                    spotifyArtistId
-                  );
-                  if (validated?.imageUrl) {
-                    await artistService.update(dbArtistId, {
-                      image_url: validated.imageUrl,
-                      image_source_url: validated.sourceUrl,
-                      image_source_provider: "spotify",
-                    });
-                    // Update local state
-                    setArtists((prev) =>
-                      prev.map((a) =>
-                        a.artist_id === dbArtistId
-                          ? {
-                              ...a,
-                              image_url: validated.imageUrl,
-                              image_source_url: validated.sourceUrl,
-                              image_source_provider: "spotify",
-                            }
-                          : a
-                      )
-                    );
-                  }
-                } catch (err) {
-                  console.error(
-                    `Error updating artist image from Spotify for "${artistName}":`,
-                    err
-                  );
-                  // Don't fail the whole operation if image validation fails
-                }
-              }
-            }
-          );
-
-          // Wait for all image updates to complete (but don't block on errors)
-          await Promise.allSettled(imageUpdatePromises);
-        } else if (bandcampArtistImage && isBandcampResult) {
-          // Fallback: if no Spotify IDs, still use Bandcamp image when available
-          try {
-            const sourceUrl =
-              bandcampMetadata?.artistImageSourceUrl ||
-              bandcampMetadata?.pageUrl ||
-              bandcampUrl ||
-              null;
-            await artistService.update(primaryArtistId, {
-              image_url: bandcampArtistImage,
-              image_source_url: sourceUrl,
-              image_source_provider: "bandcamp",
-            });
-            setArtists((prev) =>
-              prev.map((a) =>
-                a.artist_id === primaryArtistId
-                  ? {
-                      ...a,
-                      image_url: bandcampArtistImage,
-                      image_source_url: sourceUrl,
-                      image_source_provider: "bandcamp",
-                    }
-                  : a
-              )
-            );
-          } catch (err) {
-            console.error("Error updating artist image from Bandcamp:", err);
-          }
-        }
-      }
-      setSelectedArtistIds(allArtistIds);
-
-      // Find or create album
-      // For compilation albums, use the album artist ("Various Artists") instead of track artist
-      if (bandcampAlbum && primaryArtistId != null) {
-        let album = albums.find((a) => a.title === bandcampAlbum);
-
-        // Determine which artist to use for the album
-        let albumArtistId = primaryArtistId;
-
-        // Check if this is a "Various Artists" compilation
-        const isVariousArtists =
-          bandcampAlbumArtist &&
-          /various\s+artists?/i.test(bandcampAlbumArtist.trim());
-
-        if (isVariousArtists) {
-          // For "Various Artists" albums, don't create an artist entity
-          // Use the track artist's ID as a placeholder (database requires artist_id)
-          // The UI will display "Various Artists" based on album logic
-          // albumArtistId already set to primaryArtistId, which is correct
-        } else if (bandcampAlbumArtist && bandcampAlbumArtist.trim()) {
-          // Check if the album artist looks like a label name (contains common label indicators)
-          // If track artist differs significantly from album artist, it might be a compilation
-          const albumArtistName = bandcampAlbumArtist.trim();
-          const trackArtistName = effectiveNames[0] || "";
-
-          // If album artist is very different from track artist, and doesn't match "Various Artists",
-          // it's likely a label - don't create an artist entity for labels
-          // Instead, check if we should treat it as "Various Artists"
-          const isLikelyLabel =
-            albumArtistName !== trackArtistName &&
-            !/various\s+artists?/i.test(albumArtistName) &&
-            (albumArtistName.includes("-") ||
-              albumArtistName.includes("Music") ||
-              albumArtistName.includes("Records") ||
-              albumArtistName.includes("Label"));
-
-          if (isLikelyLabel) {
-            // This looks like a label, not an artist - treat as "Various Artists" compilation
-            // Don't create an artist entity for "Various Artists"
-            // Use the track artist's ID as a placeholder (database requires artist_id)
-            // The UI will display "Various Artists" based on album logic
-            // albumArtistId already set to primaryArtistId, which is correct
-          } else {
-            // Use the album artist from Bandcamp if available
-            const albumArtist = await getOrCreateArtist(albumArtistName);
-            if (albumArtist?.artist_id != null) {
-              albumArtistId = albumArtist.artist_id;
-            }
-          }
-        }
-        // Otherwise, use primaryArtistId (track artist) as fallback
-
-        if (!album) {
-          const albumId = await albumService.create({
-            title: bandcampAlbum,
-            artist_id: albumArtistId,
-            cover_image: bandcampCoverArt || null, // Include cover image from metadata
-          });
-          album = {
-            album_id: albumId,
-            title: bandcampAlbum,
-            artist_id: albumArtistId,
-            cover_image: bandcampCoverArt || null,
-          };
-          setAlbums([...albums, album]);
+        // Try to find existing album to pre-select (but don't create new one)
+        const existingAlbum = albums.find((a) => a.title === bandcampAlbum);
+        if (existingAlbum?.album_id) {
+          setAlbumId(existingAlbum.album_id.toString());
         } else {
-          // Album already exists - check if we need to update artist_id for "Various Artists"
-          // TypeScript guard: album is defined here since we're in the else branch
-          const existingAlbum = album;
-          if (existingAlbum) {
-            const currentAlbumArtist = existingAlbum.artist_id
-              ? artists.find((a) => a.artist_id === existingAlbum.artist_id)
-                  ?.name
-              : null;
-            const isCurrentVariousArtists =
-              currentAlbumArtist &&
-              /various\s+artists?/i.test(currentAlbumArtist.trim());
-
-            // If album should be "Various Artists" but currently isn't, update it
-            if (
-              isVariousArtists &&
-              !isCurrentVariousArtists &&
-              existingAlbum.album_id
-            ) {
-              try {
-                await albumService.update(existingAlbum.album_id, {
-                  artist_id: albumArtistId,
-                });
-                album = { ...existingAlbum, artist_id: albumArtistId };
-                setAlbums((prev) =>
-                  prev.map((a) =>
-                    a.album_id === existingAlbum.album_id
-                      ? { ...a, artist_id: albumArtistId }
-                      : a
-                  )
-                );
-              } catch (err) {
-                console.error("Error updating album artist:", err);
-              }
-            }
-
-            // Update album cover image if it's missing but we have one from the metadata
-            if (
-              !existingAlbum.cover_image &&
-              bandcampCoverArt &&
-              existingAlbum.album_id
-            ) {
-              try {
-                await albumService.update(existingAlbum.album_id, {
-                  cover_image: bandcampCoverArt,
-                });
-                // Update local state
-                setAlbums((prev) =>
-                  prev.map((a) =>
-                    a.album_id === existingAlbum.album_id
-                      ? { ...a, cover_image: bandcampCoverArt }
-                      : a
-                  )
-                );
-              } catch (err) {
-                console.error("Error updating album cover image:", err);
-              }
-            }
-          }
+          // No existing album found - clear selection (will be created on submit)
+          setAlbumId("");
         }
-        if (album && album.album_id) {
-          setAlbumId(album.album_id.toString());
-        }
+      } else {
+        setPendingAlbumName(null);
+        setPendingAlbumCoverArt(null);
+        setAlbumId("");
       }
     } catch (err: any) {
       console.error("Error setting metadata:", err);
@@ -1632,14 +1447,27 @@ const SongCreate = (): React.ReactElement => {
       return;
     }
 
-    if (!title.trim()) {
-      setError("Title is required");
-      return;
-    }
+    // Check if we're using Spotify metadata (pending artist names without Bandcamp metadata)
+    const isUsingSpotifyMetadata =
+      pendingArtistNames.length > 0 && !pendingBandcampMetadata;
 
-    if (!artistId) {
-      setError("Artist is required");
-      return;
+    if (!isUsingSpotifyMetadata) {
+      // Only require title and artist when not using Spotify metadata
+      if (!title.trim()) {
+        setError("Title is required");
+        return;
+      }
+
+      if (!artistId) {
+        setError("Artist is required");
+        return;
+      }
+    } else {
+      // When using Spotify metadata, ensure we have a title from the search result
+      if (!title.trim()) {
+        setError("Title is required");
+        return;
+      }
     }
 
     // Duration is only required for file uploads
@@ -1667,6 +1495,257 @@ const SongCreate = (): React.ReactElement => {
     setLoading(true);
 
     try {
+      // Track the primary artist ID for song creation (used when artists are created from pending names)
+      let resolvedPrimaryArtistId: number | null = null;
+      let resolvedSelectedArtistIds: number[] = [];
+
+      // Create artists and albums from pending names (from search results) before creating the song
+      if (pendingArtistNames.length > 0) {
+        const createdArtistsByName = new Map<string, Artist>();
+        const allArtistIds: number[] = [];
+        let primaryArtistId: number | null = null;
+
+        // Helper to get or create artist
+        const getOrCreateArtist = async (
+          rawName: string
+        ): Promise<Artist | null> => {
+          const trimmedName = rawName.trim();
+          if (!trimmedName) return null;
+          const normalizedName = normalizeArtistName(trimmedName);
+
+          // Check if already created in this operation
+          if (createdArtistsByName.has(normalizedName)) {
+            return createdArtistsByName.get(normalizedName)!;
+          }
+
+          // Check if exists in database
+          const existing = artists.find(
+            (a) => normalizeArtistName(a.name) === normalizedName
+          );
+          if (existing) {
+            createdArtistsByName.set(normalizedName, existing);
+            return existing;
+          }
+
+          // Create new artist
+          const newId = await artistService.create({ name: trimmedName });
+          const artist = { artist_id: newId, name: trimmedName };
+          createdArtistsByName.set(normalizedName, artist);
+          setArtists((prev) => [...prev, artist]);
+          return artist;
+        };
+
+        // Create all artists
+        for (const name of pendingArtistNames) {
+          const artist = await getOrCreateArtist(name);
+          if (artist?.artist_id != null) {
+            allArtistIds.push(artist.artist_id);
+            if (primaryArtistId == null) {
+              primaryArtistId = artist.artist_id;
+            }
+          }
+        }
+
+        // Update artist images using Spotify validation if we have Spotify artist IDs
+        if (pendingSpotifyArtistIds.length > 0 && allArtistIds.length > 0) {
+          const imageUpdatePromises = pendingArtistNames.map(
+            async (artistName, index) => {
+              const dbArtistId = allArtistIds[index];
+              if (!dbArtistId) return;
+
+              // Try to find Spotify ID by artist name (most reliable)
+              let spotifyArtistId: string | undefined =
+                pendingArtistNameToIdMap.get(artistName);
+
+              // Fallback to index-based matching if name lookup fails
+              if (!spotifyArtistId && index < pendingSpotifyArtistIds.length) {
+                spotifyArtistId = pendingSpotifyArtistIds[index];
+              }
+
+              if (spotifyArtistId) {
+                try {
+                  const validated = await validateAndGetArtistImage(
+                    spotifyArtistId
+                  );
+                  if (validated?.imageUrl) {
+                    await artistService.update(dbArtistId, {
+                      image_url: validated.imageUrl,
+                      image_source_url: validated.sourceUrl,
+                      image_source_provider: "spotify",
+                    });
+                    // Update local state
+                    setArtists((prev) =>
+                      prev.map((a) =>
+                        a.artist_id === dbArtistId
+                          ? {
+                              ...a,
+                              image_url: validated.imageUrl,
+                              image_source_url: validated.sourceUrl,
+                              image_source_provider: "spotify",
+                            }
+                          : a
+                      )
+                    );
+                  }
+                } catch (err) {
+                  console.error(
+                    `Error updating artist image from Spotify for "${artistName}":`,
+                    err
+                  );
+                  // Don't fail the whole operation if image validation fails
+                }
+              }
+            }
+          );
+
+          // Wait for all image updates to complete (but don't block on errors)
+          await Promise.allSettled(imageUpdatePromises);
+        } else if (pendingBandcampMetadata?.artistImage) {
+          // Fallback: if no Spotify IDs, still use Bandcamp image when available
+          if (primaryArtistId != null) {
+            try {
+              const sourceUrl =
+                pendingBandcampMetadata?.artistImageSourceUrl ||
+                pendingBandcampMetadata?.pageUrl ||
+                null;
+              await artistService.update(primaryArtistId, {
+                image_url: pendingBandcampMetadata.artistImage,
+                image_source_url: sourceUrl,
+                image_source_provider: "bandcamp",
+              });
+              setArtists((prev) =>
+                prev.map((a) =>
+                  a.artist_id === primaryArtistId
+                    ? {
+                        ...a,
+                        image_url: pendingBandcampMetadata.artistImage,
+                        image_source_url: sourceUrl,
+                        image_source_provider: "bandcamp",
+                      }
+                    : a
+                )
+              );
+            } catch (err) {
+              console.error("Error updating artist image from Bandcamp:", err);
+            }
+          }
+        }
+
+        // Update artistId and selectedArtistIds with created artists
+        if (primaryArtistId != null) {
+          resolvedPrimaryArtistId = primaryArtistId;
+          resolvedSelectedArtistIds = allArtistIds;
+          setArtistId(primaryArtistId.toString());
+          setSelectedArtistIds(allArtistIds);
+        }
+
+        // Clear pending artist names
+        setPendingArtistNames([]);
+        setPendingSpotifyArtistIds([]);
+        setPendingArtistNameToIdMap(new Map());
+      } else {
+        // Use existing artistId if no pending artists
+        if (artistId) {
+          resolvedPrimaryArtistId = parseInt(artistId);
+          resolvedSelectedArtistIds = selectedArtistIds;
+        }
+      }
+
+      // Create album from pending name if needed
+      if (pendingAlbumName) {
+        let album = albums.find((a) => a.title === pendingAlbumName);
+
+        if (!album) {
+          // Determine album artist ID
+          let albumArtistId: number | null = null;
+
+          // Use primary artist ID if available
+          if (artistId) {
+            albumArtistId = parseInt(artistId);
+          }
+
+          // Check if this is a "Various Artists" compilation (from Bandcamp metadata)
+          const bandcampAlbumArtist = pendingBandcampMetadata?.albumArtist;
+          const isVariousArtists =
+            bandcampAlbumArtist &&
+            /various\s+artists?/i.test(bandcampAlbumArtist.trim());
+
+          if (
+            !isVariousArtists &&
+            bandcampAlbumArtist &&
+            bandcampAlbumArtist.trim()
+          ) {
+            // Check if the album artist looks like a label name
+            const albumArtistName = bandcampAlbumArtist.trim();
+            const trackArtistName = pendingArtistNames[0] || "";
+
+            const isLikelyLabel =
+              albumArtistName !== trackArtistName &&
+              !/various\s+artists?/i.test(albumArtistName) &&
+              (albumArtistName.includes("-") ||
+                albumArtistName.includes("Music") ||
+                albumArtistName.includes("Records") ||
+                albumArtistName.includes("Label"));
+
+            if (!isLikelyLabel) {
+              // Create or find album artist
+              const normalizedName = normalizeArtistName(albumArtistName);
+              const existingAlbumArtist = artists.find(
+                (a) => normalizeArtistName(a.name) === normalizedName
+              );
+
+              if (existingAlbumArtist) {
+                albumArtistId = existingAlbumArtist.artist_id;
+              } else {
+                const newId = await artistService.create({
+                  name: albumArtistName,
+                });
+                const newArtist = { artist_id: newId, name: albumArtistName };
+                setArtists((prev) => [...prev, newArtist]);
+                albumArtistId = newId;
+              }
+            }
+          }
+
+          // Ensure we have a valid artist ID for the album
+          // Use artistId as fallback if albumArtistId is still null
+          if (albumArtistId === null && artistId) {
+            albumArtistId = parseInt(artistId);
+          }
+
+          // Only create album if we have a valid artist ID
+          if (albumArtistId !== null) {
+            // Create album
+            const albumId = await albumService.create({
+              title: pendingAlbumName,
+              artist_id: albumArtistId,
+              cover_image: pendingAlbumCoverArt || null,
+            });
+            album = {
+              album_id: albumId,
+              title: pendingAlbumName,
+              artist_id: albumArtistId,
+              cover_image: pendingAlbumCoverArt || null,
+            };
+            setAlbums([...albums, album]);
+          } else {
+            // Skip album creation if no valid artist ID available
+            console.warn(
+              "Skipping album creation: no valid artist ID available"
+            );
+          }
+        }
+
+        if (album?.album_id) {
+          setAlbumId(album.album_id.toString());
+        }
+
+        // Clear pending album data
+        setPendingAlbumName(null);
+        setPendingAlbumCoverArt(null);
+        setPendingBandcampMetadata(null);
+      }
+
       // If multi-file mode, submit all files at once
       if (files.length > 1) {
         let successCount = 0;
@@ -1757,10 +1836,24 @@ const SongCreate = (): React.ReactElement => {
           .then((buf) => new Blob([buf], { type: file.type }));
       }
 
+      // Use resolved artist ID (from pending names) or fall back to state
+      const finalArtistId =
+        resolvedPrimaryArtistId ?? (artistId ? parseInt(artistId) : null);
+      const finalSelectedArtistIds =
+        resolvedSelectedArtistIds.length > 0
+          ? resolvedSelectedArtistIds
+          : selectedArtistIds;
+
+      if (!finalArtistId) {
+        setError("Artist is required");
+        setLoading(false);
+        return;
+      }
+
       // Create song in IndexedDB
       const newSongId = await songService.create({
         title: title.trim(),
-        artist_id: parseInt(artistId),
+        artist_id: finalArtistId,
         album_id: albumId ? parseInt(albumId) : null,
         duration: finalDuration,
         file_blob: fileBlob,
@@ -1770,19 +1863,17 @@ const SongCreate = (): React.ReactElement => {
       });
 
       // Associate artists with this song (many-to-many)
-      const primaryId = parseInt(artistId);
-
       // Always associate all detected artists; Bandcamp uses explicit separators only
       const artistIdsToAssociate = Array.from(
-        new Set([primaryId, ...selectedArtistIds])
+        new Set([finalArtistId, ...finalSelectedArtistIds])
       );
 
       if (import.meta.env.DEV) {
         console.log("Associating song with artists:", {
           songId: newSongId,
-          primaryArtistId: primaryId,
+          primaryArtistId: finalArtistId,
           allArtistIds: artistIdsToAssociate,
-          selectedArtistIds: selectedArtistIds,
+          selectedArtistIds: finalSelectedArtistIds,
           isBandcampSong:
             !!bandcampPageUrl || (songUrl && isBandcampUrl(songUrl)),
         });
@@ -3526,69 +3617,139 @@ const SongCreate = (): React.ReactElement => {
 
         {addMode === "upload" ? (
           <>
-            <div className="form-group">
-              <label className="form-label">//title</label>
-              <div
-                style={{ display: "flex", gap: "12px", alignItems: "center" }}
-              >
-                {coverImage && (
-                  <img
-                    src={coverImage}
-                    alt="Cover"
+            {/* Only show title, artist, and album fields when in manual metadata mode */}
+            {!useSpotifyMetadata && (
+              <>
+                <div className="form-group">
+                  <label className="form-label">//title</label>
+                  <div
                     style={{
-                      width: "60px",
-                      height: "60px",
-                      objectFit: "cover",
-                      borderRadius: "4px",
-                      flexShrink: 0,
+                      display: "flex",
+                      gap: "12px",
+                      alignItems: "center",
                     }}
-                  />
-                )}
-                <input
-                  type="text"
-                  className="form-input"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="song title"
-                  required
-                  style={{ flex: 1 }}
-                />
-              </div>
-            </div>
+                  >
+                    {coverImage && (
+                      <img
+                        src={coverImage}
+                        alt="Cover"
+                        style={{
+                          width: "60px",
+                          height: "60px",
+                          objectFit: "cover",
+                          borderRadius: "4px",
+                          flexShrink: 0,
+                        }}
+                      />
+                    )}
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      placeholder="song title"
+                      required
+                      style={{ flex: 1 }}
+                    />
+                  </div>
+                </div>
 
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">//album</label>
-                <select
-                  className="form-input"
-                  value={albumId}
-                  onChange={(e) => setAlbumId(e.target.value)}
-                >
-                  <option value="">select album</option>
-                  {albums.map((a) => (
-                    <option key={a.album_id} value={a.album_id}>
-                      {a.title}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">//album</label>
+                    <select
+                      className="form-input"
+                      value={albumId}
+                      onChange={(e) => {
+                        setAlbumId(e.target.value);
+                        // Clear pending album if user manually changes selection
+                        if (e.target.value) {
+                          setPendingAlbumName(null);
+                          setPendingAlbumCoverArt(null);
+                        }
+                      }}
+                    >
+                      <option value="">select album</option>
+                      {albums.map((a) => (
+                        <option key={a.album_id} value={a.album_id}>
+                          {a.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              <div className="form-group">
-                <label className="form-label">//artist</label>
-                <select
-                  className="form-input"
-                  value={artistId}
-                  onChange={(e) => setArtistId(e.target.value)}
+                  <div className="form-group">
+                    <label className="form-label">//artist</label>
+                    <select
+                      className="form-input"
+                      value={artistId}
+                      onChange={(e) => {
+                        setArtistId(e.target.value);
+                        // Clear pending artists if user manually changes selection
+                        if (e.target.value) {
+                          setPendingArtistNames([]);
+                          setPendingSpotifyArtistIds([]);
+                          setPendingArtistNameToIdMap(new Map());
+                        }
+                      }}
+                    >
+                      <option value="">select artist</option>
+                      {artists.map((a) => (
+                        <option key={a.artist_id} value={a.artist_id}>
+                          {a.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Show metadata preview when using Spotify and a result is selected */}
+            {useSpotifyMetadata &&
+              pendingArtistNames.length > 0 &&
+              !pendingBandcampMetadata &&
+              title && (
+                <div
+                  style={{
+                    padding: "16px",
+                    backgroundColor: "var(--card-bg)",
+                    borderRadius: "4px",
+                    border: "1px solid var(--border-color)",
+                    marginBottom: "16px",
+                  }}
                 >
-                  <option value="">select artist</option>
-                  {artists.map((a) => (
-                    <option key={a.artist_id} value={a.artist_id}>
-                      {a.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
+                  <div style={{ display: "flex", gap: "16px" }}>
+                    {coverImage && (
+                      <img
+                        src={coverImage}
+                        alt="Cover"
+                        style={{
+                          width: "80px",
+                          height: "80px",
+                          objectFit: "cover",
+                          borderRadius: "4px",
+                          flexShrink: 0,
+                        }}
+                      />
+                    )}
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: "bold", marginBottom: "8px" }}>
+                        {title}
+                      </div>
+                      <div
+                        style={{
+                          color: "var(--text-secondary)",
+                          fontSize: "14px",
+                        }}
+                      >
+                        {pendingArtistNames.join(", ")}
+                        {pendingAlbumName && ` • ${pendingAlbumName}`}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
           </>
         ) : (
           // Bandcamp mode: show metadata preview
