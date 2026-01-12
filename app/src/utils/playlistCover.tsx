@@ -5,9 +5,7 @@ import { SongWithRelations } from "../services/db";
  * Get unique cover arts from playlist songs based on album_id
  * Returns up to 4 unique cover images
  */
-export function getUniqueCoverArts(
-  songs: SongWithRelations[]
-): string[] {
+export function getUniqueCoverArts(songs: SongWithRelations[]): string[] {
   const seenAlbums = new Set<number | null>();
   const uniqueCovers: string[] = [];
 
@@ -15,8 +13,11 @@ export function getUniqueCoverArts(
     // Skip if we already have 4 unique covers
     if (uniqueCovers.length >= 4) break;
 
+    // Normalize album_id: convert undefined to null
+    const albumId = song.album_id ?? null;
+
     // Skip if we've already seen this album
-    if (song.album_id !== null && seenAlbums.has(song.album_id)) {
+    if (albumId !== null && seenAlbums.has(albumId)) {
       continue;
     }
 
@@ -25,8 +26,8 @@ export function getUniqueCoverArts(
 
     if (coverImage) {
       uniqueCovers.push(coverImage);
-      if (song.album_id !== null) {
-        seenAlbums.add(song.album_id);
+      if (albumId !== null) {
+        seenAlbums.add(albumId);
       }
     }
   }
