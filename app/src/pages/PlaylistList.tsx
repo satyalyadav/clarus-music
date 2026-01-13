@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { playlistService, getSongsWithRelations } from "../services/db";
+import { playlistService, getSongsWithRelations, SongWithRelations } from "../services/db";
 import { PlaylistCover } from "../utils/playlistCover";
 
 interface Playlist {
@@ -11,7 +11,7 @@ interface Playlist {
 }
 
 interface PlaylistWithSongs extends Playlist {
-  songs: any[];
+  songs: SongWithRelations[];
 }
 
 const PlaylistList: React.FC = () => {
@@ -29,12 +29,23 @@ const PlaylistList: React.FC = () => {
       // Fetch songs for each playlist and create enriched playlists
       const playlistsWithSongs = await Promise.all(
         playlistsData.map(async (playlist) => {
-          if (!playlist.playlist_id) return { ...playlist, songs: [] };
+          if (!playlist.playlist_id) return { ...playlist, songs: [] as SongWithRelations[] };
           const playlistSongs = await playlistService.getSongs(playlist.playlist_id);
-          // Enrich with relations
-          const enrichedSongs = playlistSongs.map((song) => {
+          // Enrich with relations - ensure we get SongWithRelations with cover images
+          const enrichedSongs: SongWithRelations[] = playlistSongs.map((song) => {
             const enriched = allSongs.find((s) => s.song_id === song.song_id);
-            return enriched || song;
+            if (enriched) {
+              return enriched;
+            }
+            // If not found, create a SongWithRelations from the basic song
+            // This ensures cover_image and album_cover_image are available
+            return {
+              ...song,
+              artist_name: undefined,
+              artist_names: undefined,
+              album_title: undefined,
+              album_cover_image: null,
+            } as SongWithRelations;
           });
           return { ...playlist, songs: enrichedSongs };
         })
@@ -100,7 +111,17 @@ const PlaylistList: React.FC = () => {
               className="grid-item"
               onClick={() => navigate(`/playlists/${playlist.playlist_id}`)}
             >
-              <div className="grid-item-image" style={{ padding: 0, overflow: "hidden", borderRadius: "8px 8px 0 0" }}>
+              <div 
+                className="grid-item-image" 
+                style={{ 
+                  padding: 0, 
+                  overflow: "hidden", 
+                  borderRadius: "8px 8px 0 0",
+                  display: "block",
+                  width: "100%",
+                  aspectRatio: "1",
+                }}
+              >
                 <PlaylistCover songs={playlist.songs} fillContainer={true} />
               </div>
               <div className="grid-item-content">

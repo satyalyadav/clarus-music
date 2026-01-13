@@ -302,6 +302,8 @@ const PlaylistDetail: React.FC = () => {
             const isDragging = dragIndex === index;
             const isDragOver = dragOverIndex === index;
 
+            const coverImage = song.cover_image || song.album_cover_image;
+
             return (
               <div
                 key={song.song_id}
@@ -336,6 +338,19 @@ const PlaylistDetail: React.FC = () => {
                 >
                   {index + 1}
                 </span>
+                {coverImage && (
+                  <img
+                    src={coverImage}
+                    alt={song.title}
+                    style={{
+                      width: "50px",
+                      height: "50px",
+                      objectFit: "cover",
+                      borderRadius: "4px",
+                      marginRight: "12px",
+                    }}
+                  />
+                )}
                 <div className="list-item-content">
                   <div
                     className={`list-item-title ${isCurrent ? "playing" : ""}`}
