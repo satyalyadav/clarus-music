@@ -39,12 +39,26 @@ const ArtistList: React.FC = () => {
       {artists.length === 0 ? (
         <div className="empty">No artists found.</div>
       ) : (
-        <div className="grid">
+        <div 
+          className="grid"
+          style={{
+            gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
+          }}
+        >
           {artists.map((artist) => (
             <div
               key={artist.artist_id}
               className="grid-item"
               onClick={() => navigate(`/artists/${artist.artist_id}`)}
+              style={{
+                aspectRatio: "1",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "flex-start",
+                padding: "12px",
+                overflow: "hidden",
+              }}
             >
               <div
                 className="grid-item-image"
@@ -52,9 +66,14 @@ const ArtistList: React.FC = () => {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  fontSize: "48px",
+                  fontSize: "36px",
                   overflow: "hidden",
                   background: artist.image_url ? "transparent" : "var(--card-bg)",
+                  aspectRatio: "1",
+                  width: "70%",
+                  flexShrink: 0,
+                  marginTop: "auto",
+                  marginBottom: "8px",
                 }}
               >
                 {artist.image_url ? (
@@ -65,6 +84,7 @@ const ArtistList: React.FC = () => {
                       width: "100%",
                       height: "100%",
                       objectFit: "cover",
+                      borderRadius: "50%",
                     }}
                     onError={(e) => {
                       // Fallback to emoji if image fails to load
@@ -79,12 +99,38 @@ const ArtistList: React.FC = () => {
                     }}
                   />
                 ) : (
-                  <span>🎤</span>
+                  <span style={{ borderRadius: "50%" }}>🎤</span>
                 )}
               </div>
-              <div className="grid-item-content">
-                <div className="grid-item-title">{artist.name}</div>
-                <div className="grid-item-subtitle">artist</div>
+              <div 
+                className="grid-item-content"
+                style={{
+                  width: "100%",
+                  padding: "0",
+                  textAlign: "center",
+                  flexShrink: 0,
+                  minHeight: "32px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <div 
+                  className="grid-item-title"
+                  style={{
+                    textAlign: "center",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    display: "-webkit-box",
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: "vertical",
+                    wordBreak: "break-word",
+                    lineHeight: "1.2",
+                    fontSize: "13px",
+                  }}
+                >
+                  {artist.name}
+                </div>
               </div>
             </div>
           ))}
