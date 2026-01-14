@@ -243,10 +243,20 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
   }, [currentIndex]);
 
   const playNextRef = useRef(playNext);
+  const playPreviousRef = useRef(playPrevious);
+  const togglePlayPauseRef = useRef(togglePlayPause);
 
   useEffect(() => {
     playNextRef.current = playNext;
   }, [playNext]);
+
+  useEffect(() => {
+    playPreviousRef.current = playPrevious;
+  }, [playPrevious]);
+
+  useEffect(() => {
+    togglePlayPauseRef.current = togglePlayPause;
+  }, [togglePlayPause]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -303,6 +313,129 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
       audio.removeEventListener("pause", onPause);
     };
   }, []);
+
+  // Keyboard shortcuts for media controls
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't handle if user is typing in an input/textarea
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      ) {
+        return;
+      }
+
+      // Space bar for play/pause
+      if (e.code === "Space" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        togglePlayPauseRef.current();
+        return;
+      }
+
+      // Arrow keys for next/previous
+      if (e.code === "ArrowRight" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        playNextRef.current();
+        return;
+      }
+
+      if (e.code === "ArrowLeft" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        playPreviousRef.current();
+        return;
+      }
+
+      // Media keys (if supported)
+      if (e.code === "MediaTrackNext") {
+        e.preventDefault();
+        playNextRef.current();
+        return;
+      }
+
+      if (e.code === "MediaTrackPrevious") {
+        e.preventDefault();
+        playPreviousRef.current();
+        return;
+      }
+
+      if (e.code === "MediaPlayPause") {
+        e.preventDefault();
+        togglePlayPauseRef.current();
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
+  // Media Session API for Bluetooth/OS media controls
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) {
+      return;
+    }
+
+    const mediaSession = navigator.mediaSession;
+
+    // Set up action handlers
+    mediaSession.setActionHandler("play", () => {
+      togglePlayPauseRef.current();
+    });
+
+    mediaSession.setActionHandler("pause", () => {
+      togglePlayPauseRef.current();
+    });
+
+    mediaSession.setActionHandler("previoustrack", () => {
+      playPreviousRef.current();
+    });
+
+    mediaSession.setActionHandler("nexttrack", () => {
+      playNextRef.current();
+    });
+
+    // Cleanup
+    return () => {
+      try {
+        mediaSession.setActionHandler("play", null);
+        mediaSession.setActionHandler("pause", null);
+        mediaSession.setActionHandler("previoustrack", null);
+        mediaSession.setActionHandler("nexttrack", null);
+      } catch (e) {
+        // Ignore errors during cleanup
+      }
+    };
+  }, []);
+
+  // Update Media Session metadata when track changes
+  useEffect(() => {
+    if (!("mediaSession" in navigator) || !currentTrack) {
+      return;
+    }
+
+    const mediaSession = navigator.mediaSession;
+    mediaSession.metadata = new MediaMetadata({
+      title: currentTrack.title || "Unknown",
+      artist: currentTrack.artist || "Unknown Artist",
+      album: currentTrack.album || "",
+      artwork: currentTrack.cover
+        ? [
+            {
+              src: currentTrack.cover,
+              sizes: "512x512",
+              type: "image/png",
+            },
+          ]
+        : [],
+    });
+
+    // Update playback state
+    mediaSession.playbackState = isPlaying ? "playing" : "paused";
+  }, [currentTrack, isPlaying]);
 
   // Wrapped setQueue that resets insertion index when queue is replaced
   const wrappedSetQueue = (tracks: Track[] | ((prev: Track[]) => Track[])) => {

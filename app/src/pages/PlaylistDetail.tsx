@@ -166,15 +166,15 @@ const PlaylistDetail: React.FC = () => {
 
   const movePlaylistSong = async (fromIndex: number, toIndex: number) => {
     if (fromIndex === toIndex || !playlist || !id) return;
-    
+
     const playlistId = parseInt(id);
     const newSongs = [...playlist.songs];
     const [moved] = newSongs.splice(fromIndex, 1);
     newSongs.splice(toIndex, 0, moved);
-    
+
     // Update local state immediately for responsive UI
     setPlaylist({ ...playlist, songs: newSongs });
-    
+
     // Save new order to database
     try {
       const songIds = newSongs
@@ -205,10 +205,7 @@ const PlaylistDetail: React.FC = () => {
     setDragOverIndex(index);
   };
 
-  const handleDrop = (
-    e: React.DragEvent<HTMLDivElement>,
-    index: number
-  ) => {
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>, index: number) => {
     e.preventDefault();
     const fromIndex =
       dragIndex !== null
