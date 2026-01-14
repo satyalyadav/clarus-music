@@ -14,11 +14,20 @@ interface AlbumWithCover extends Album {
   artistName?: string;
 }
 
+type AlbumSortOption = 
+  | "title-asc" 
+  | "title-desc" 
+  | "artist-asc" 
+  | "artist-desc" 
+  | "date-added-desc" 
+  | "date-added-asc";
+
 const AlbumList: React.FC = () => {
   const navigate = useNavigate();
   const [albums, setAlbums] = useState<AlbumWithCover[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sortOption, setSortOption] = useState<AlbumSortOption>("title-asc");
   const normalizeMatchValue = (value: string): string =>
     value.toLowerCase().replace(/[^a-z0-9]/g, "");
 
@@ -175,12 +184,74 @@ const AlbumList: React.FC = () => {
     loadAlbums();
   }, []);
 
+  // Sort albums based on selected option
+  const sortedAlbums = React.useMemo(() => {
+    const sorted = [...albums];
+    
+    switch (sortOption) {
+      case "title-asc":
+        return sorted.sort((a, b) => a.title.localeCompare(b.title));
+      case "title-desc":
+        return sorted.sort((a, b) => b.title.localeCompare(a.title));
+      case "artist-asc":
+        return sorted.sort((a, b) => 
+          (a.artistName || "").localeCompare(b.artistName || "")
+        );
+      case "artist-desc":
+        return sorted.sort((a, b) => 
+          (b.artistName || "").localeCompare(a.artistName || "")
+        );
+      case "date-added-desc":
+        return sorted.sort((a, b) => {
+          const dateA = a.album_id || 0;
+          const dateB = b.album_id || 0;
+          return dateB - dateA; // Higher ID = newer
+        });
+      case "date-added-asc":
+        return sorted.sort((a, b) => {
+          const dateA = a.album_id || 0;
+          const dateB = b.album_id || 0;
+          return dateA - dateB; // Lower ID = older
+        });
+      default:
+        return sorted;
+    }
+  }, [albums, sortOption]);
+
   if (loading) return <div className="loading">Loading albums...</div>;
   if (error) return <div className="error">Error: {error}</div>;
 
   return (
     <div>
-      <h1 className="section-title">albums</h1>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
+        <h1 className="section-title" style={{ margin: 0 }}>albums</h1>
+        {albums.length > 0 && (
+          <select
+            value={sortOption}
+            onChange={(e) => setSortOption(e.target.value as AlbumSortOption)}
+            style={{
+              padding: "8px 32px 8px 12px",
+              borderRadius: "6px",
+              border: "1px solid var(--border-color)",
+              background: `var(--card-bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 9L1 4h10z'/%3E%3C/svg%3E") no-repeat right 10px center`,
+              backgroundSize: "12px",
+              color: "var(--text-primary)",
+              fontSize: "14px",
+              cursor: "pointer",
+              appearance: "none",
+              WebkitAppearance: "none",
+              MozAppearance: "none",
+            }}
+          >
+            <option value="title-asc">Title (A-Z)</option>
+            <option value="title-desc">Title (Z-A)</option>
+            <option value="artist-asc">Artist (A-Z)</option>
+            <option value="artist-desc">Artist (Z-A)</option>
+            <option value="date-added-desc">Date Added (Newest)</option>
+            <option value="date-added-asc">Date Added (Oldest)</option>
+          </select>
+        )}
+      </div>
 
       {albums.length === 0 ? (
         <div className="empty">
@@ -188,7 +259,7 @@ const AlbumList: React.FC = () => {
         </div>
       ) : (
         <div className="grid">
-          {albums.map((album) => (
+          {sortedAlbums.map((album) => (
             <div
               key={album.album_id}
               className="grid-item"

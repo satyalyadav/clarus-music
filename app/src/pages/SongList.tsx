@@ -9,6 +9,18 @@ import { shuffleArray } from "../utils/shuffleArray";
 import { playQueueFromIndex, playQueueFromStart } from "../utils/queuePlayback";
 import { buildTracksFromSongs, createTrackFromSong } from "../utils/trackUtils";
 
+type SongSortOption = 
+  | "title-asc" 
+  | "title-desc" 
+  | "artist-asc" 
+  | "artist-desc" 
+  | "album-asc" 
+  | "album-desc"
+  | "duration-asc" 
+  | "duration-desc" 
+  | "date-added-desc" 
+  | "date-added-asc";
+
 const SongList: React.FC = () => {
   const [songs, setSongs] = useState<SongWithRelations[]>([]);
   const [loading, setLoading] = useState(true);
@@ -16,6 +28,7 @@ const SongList: React.FC = () => {
   const [selectedSongs, setSelectedSongs] = useState<Set<number>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [sortOption, setSortOption] = useState<SongSortOption>("title-asc");
   const navigate = useNavigate();
   const { songUrls, getOrCreateSongUrl, prefetchSongUrls, syncSongUrls } =
     useSongUrls();
@@ -48,11 +61,11 @@ const SongList: React.FC = () => {
   }, [prefetchSongUrls, syncSongUrls]);
 
   const buildTracks = async () => {
-    return buildTracksFromSongs(songs, getOrCreateSongUrl);
+    return buildTracksFromSongs(sortedSongs, getOrCreateSongUrl);
   };
 
   const handlePlayAll = async () => {
-    if (songs.length === 0) return;
+    if (sortedSongs.length === 0) return;
     try {
       const validTracks = await buildTracks();
       if (validTracks.length === 0) {
@@ -71,7 +84,7 @@ const SongList: React.FC = () => {
   };
 
   const handleShuffleAll = async () => {
-    if (songs.length === 0) return;
+    if (sortedSongs.length === 0) return;
     try {
       const validTracks = await buildTracks();
       if (validTracks.length === 0) {
@@ -110,11 +123,11 @@ const SongList: React.FC = () => {
   };
 
   const toggleSelectAll = () => {
-    if (selectedSongs.size === songs.length) {
+    if (selectedSongs.size === sortedSongs.length) {
       setSelectedSongs(new Set());
     } else {
       const allIds = new Set(
-        songs.map((s) => s.song_id).filter((id): id is number => !!id)
+        sortedSongs.map((s) => s.song_id).filter((id): id is number => !!id)
       );
       setSelectedSongs(allIds);
     }
@@ -239,12 +252,109 @@ const SongList: React.FC = () => {
     }
   };
 
+  // Helper function to parse duration string (HH:MM:SS) to seconds
+  const parseDuration = (duration: string): number => {
+    const parts = duration.split(":").map(Number);
+    if (parts.length === 3) {
+      return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    } else if (parts.length === 2) {
+      return parts[0] * 60 + parts[1];
+    }
+    return 0;
+  };
+
+  // Sort songs based on selected option
+  const sortedSongs = React.useMemo(() => {
+    const sorted = [...songs];
+    
+    switch (sortOption) {
+      case "title-asc":
+        return sorted.sort((a, b) => a.title.localeCompare(b.title));
+      case "title-desc":
+        return sorted.sort((a, b) => b.title.localeCompare(a.title));
+      case "artist-asc":
+        return sorted.sort((a, b) => 
+          (a.artist_name || "").localeCompare(b.artist_name || "")
+        );
+      case "artist-desc":
+        return sorted.sort((a, b) => 
+          (b.artist_name || "").localeCompare(a.artist_name || "")
+        );
+      case "album-asc":
+        return sorted.sort((a, b) => 
+          (a.album_title || "").localeCompare(b.album_title || "")
+        );
+      case "album-desc":
+        return sorted.sort((a, b) => 
+          (b.album_title || "").localeCompare(a.album_title || "")
+        );
+      case "duration-asc":
+        return sorted.sort((a, b) => {
+          const durationA = parseDuration(a.duration);
+          const durationB = parseDuration(b.duration);
+          return durationA - durationB;
+        });
+      case "duration-desc":
+        return sorted.sort((a, b) => {
+          const durationA = parseDuration(a.duration);
+          const durationB = parseDuration(b.duration);
+          return durationB - durationA;
+        });
+      case "date-added-desc":
+        return sorted.sort((a, b) => {
+          const dateA = a.song_id || 0;
+          const dateB = b.song_id || 0;
+          return dateB - dateA; // Higher ID = newer
+        });
+      case "date-added-asc":
+        return sorted.sort((a, b) => {
+          const dateA = a.song_id || 0;
+          const dateB = b.song_id || 0;
+          return dateA - dateB; // Lower ID = older
+        });
+      default:
+        return sorted;
+    }
+  }, [songs, sortOption]);
+
   if (loading) return <div className="loading">Loading songs...</div>;
   if (error) return <div className="error">Error: {error}</div>;
 
   return (
     <div>
-      <h1 className="section-title">songs</h1>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
+        <h1 className="section-title" style={{ margin: 0 }}>songs</h1>
+        {songs.length > 0 && (
+          <select
+            value={sortOption}
+            onChange={(e) => setSortOption(e.target.value as SongSortOption)}
+            style={{
+              padding: "8px 32px 8px 12px",
+              borderRadius: "6px",
+              border: "1px solid var(--border-color)",
+              background: `var(--card-bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 9L1 4h10z'/%3E%3C/svg%3E") no-repeat right 10px center`,
+              backgroundSize: "12px",
+              color: "var(--text-primary)",
+              fontSize: "14px",
+              cursor: "pointer",
+              appearance: "none",
+              WebkitAppearance: "none",
+              MozAppearance: "none",
+            }}
+          >
+            <option value="title-asc">Title (A-Z)</option>
+            <option value="title-desc">Title (Z-A)</option>
+            <option value="artist-asc">Artist (A-Z)</option>
+            <option value="artist-desc">Artist (Z-A)</option>
+            <option value="album-asc">Album (A-Z)</option>
+            <option value="album-desc">Album (Z-A)</option>
+            <option value="duration-asc">Duration (Shortest)</option>
+            <option value="duration-desc">Duration (Longest)</option>
+            <option value="date-added-desc">Date Added (Newest)</option>
+            <option value="date-added-asc">Date Added (Oldest)</option>
+          </select>
+        )}
+      </div>
 
       <div
         style={{
@@ -258,14 +368,14 @@ const SongList: React.FC = () => {
         <button
           className="btn btn-primary"
           onClick={handlePlayAll}
-          disabled={songs.length === 0 || selectionMode}
+          disabled={sortedSongs.length === 0 || selectionMode}
         >
           ▶ play all
         </button>
         <button
           className="btn"
           onClick={handleShuffleAll}
-          disabled={songs.length === 0 || selectionMode}
+          disabled={sortedSongs.length === 0 || selectionMode}
         >
           shuffle
         </button>
@@ -287,7 +397,7 @@ const SongList: React.FC = () => {
             {selectionMode && (
               <>
                 <button className="btn" onClick={toggleSelectAll}>
-                  {selectedSongs.size === songs.length
+                  {selectedSongs.size === sortedSongs.length
                     ? "deselect all"
                     : "select all"}
                 </button>
@@ -328,7 +438,7 @@ const SongList: React.FC = () => {
         </div>
       ) : (
         <div className="list">
-          {songs.map((song) => {
+          {sortedSongs.map((song) => {
             // Use songId for reliable matching, fallback to URL matching
             const isCurrent =
               (song.song_id && currentTrack?.songId === song.song_id) ||
