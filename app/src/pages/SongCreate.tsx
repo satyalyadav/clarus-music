@@ -833,6 +833,15 @@ const SongCreate = (): React.ReactElement => {
         return null;
       }
 
+      // Check if response is actually JSON (not HTML error page)
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        console.warn(
+          `Spotify API returned non-JSON response for artist ${artistId}: ${contentType}`
+        );
+        return null;
+      }
+
       const artistData = await response.json();
 
       if (Array.isArray(artistData.images) && artistData.images.length > 0) {
@@ -856,7 +865,14 @@ const SongCreate = (): React.ReactElement => {
 
       return null;
     } catch (error) {
-      console.error("Error validating artist image from Spotify:", error);
+      // Handle JSON parsing errors (e.g., when API returns HTML error page)
+      if (error instanceof SyntaxError && error.message.includes("JSON")) {
+        console.warn(
+          `Spotify API returned invalid JSON for artist ${artistId} (likely HTML error page)`
+        );
+      } else {
+        console.error("Error validating artist image from Spotify:", error);
+      }
       return null;
     }
   };
@@ -1659,8 +1675,11 @@ const SongCreate = (): React.ReactElement => {
           // Determine album artist ID
           let albumArtistId: number | null = null;
 
-          // Use primary artist ID if available
-          if (artistId) {
+          // Use resolved primary artist ID if available (prefer this over state variable)
+          if (resolvedPrimaryArtistId !== null) {
+            albumArtistId = resolvedPrimaryArtistId;
+          } else if (artistId) {
+            // Fallback to state variable if resolved ID not available
             albumArtistId = parseInt(artistId);
           }
 
@@ -1708,8 +1727,11 @@ const SongCreate = (): React.ReactElement => {
           }
 
           // Ensure we have a valid artist ID for the album
-          // Use artistId as fallback if albumArtistId is still null
-          if (albumArtistId === null && artistId) {
+          // Use resolvedPrimaryArtistId as fallback if albumArtistId is still null
+          if (albumArtistId === null && resolvedPrimaryArtistId !== null) {
+            albumArtistId = resolvedPrimaryArtistId;
+          } else if (albumArtistId === null && artistId) {
+            // Final fallback to state variable
             albumArtistId = parseInt(artistId);
           }
 
