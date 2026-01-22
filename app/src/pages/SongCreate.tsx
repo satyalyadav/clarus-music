@@ -2069,16 +2069,19 @@ const SongCreate = (): React.ReactElement => {
 
           // Check if exists in database - query directly instead of relying on stale state
           // First check state (fast), then query DB if not found (more reliable)
-          let existing = artists.find(
+          let existing: (Artist & { artist_id: number }) | undefined = artists.find(
             (a) => normalizeArtistName(a.name) === normalizedName,
           );
           
           // If not found in state, query database directly to avoid stale state issues
           if (!existing) {
             const allArtists = await artistService.getAll();
-            existing = allArtists.find(
-              (a) => normalizeArtistName(a.name) === normalizedName,
+            const found = allArtists.find(
+              (a) => normalizeArtistName(a.name) === normalizedName && a.artist_id !== undefined,
             );
+            if (found && found.artist_id !== undefined) {
+              existing = found as Artist & { artist_id: number };
+            }
           }
           
           if (existing) {
