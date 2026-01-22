@@ -48,6 +48,9 @@ interface FileFormState {
   searchQuery: string;
   searchResults: SearchResult[];
   showResults: boolean;
+  pendingArtistNames?: string[]; // Track pending artists for this file
+  pendingAlbumName?: string | null; // Track pending album for this file
+  pendingAlbumCoverArt?: string | null; // Track pending album cover art for this file
 }
 
 const SongCreate = (): React.ReactElement => {
@@ -80,20 +83,22 @@ const SongCreate = (): React.ReactElement => {
   >(new Map());
   const [playingFileIndex, setPlayingFileIndex] = useState<number | null>(null);
   const [playbackTimes, setPlaybackTimes] = useState<Map<number, number>>(
-    new Map()
+    new Map(),
   );
   const [fileFormStates, setFileFormStates] = useState<
     Map<number, FileFormState>
   >(new Map());
+  // Counter to force sync useEffect to run when fileFormStates changes
+  const [fileFormStatesVersion, setFileFormStatesVersion] = useState(0);
   const [useSpotifyMetadata, setUseSpotifyMetadata] = useState<boolean>(true);
   const [incompleteFiles, setIncompleteFiles] = useState<Set<number>>(
-    new Set()
+    new Set(),
   );
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const [albums, setAlbums] = useState<(Album & { album_id: number })[]>([]);
   const [artists, setArtists] = useState<(Artist & { artist_id: number })[]>(
-    []
+    [],
   );
   const [selectedArtistIds, setSelectedArtistIds] = useState<number[]>([]);
 
@@ -140,9 +145,34 @@ const SongCreate = (): React.ReactElement => {
 
   // Auto-save form state when form fields change (only for multi-file mode)
   useEffect(() => {
+    // Don't auto-save if we're currently restoring state for this file
+    if (
+      isRestoringStateRef.current &&
+      restoringFileIndexRef.current === currentFileIndex
+    ) {
+      return;
+    }
+
     if (currentFileIndex !== null && files.length > 1) {
       setFileFormStates((prev) => {
         const newMap = new Map(prev);
+        const currentState = prev.get(currentFileIndex);
+        
+        // If albumId is set, look up the album name to store as pendingAlbumName
+        let resolvedPendingAlbumName = pendingAlbumName;
+        if (!resolvedPendingAlbumName && albumId) {
+          const selectedAlbum = albums.find(
+            (a) => a.album_id?.toString() === albumId
+          );
+          if (selectedAlbum?.title) {
+            resolvedPendingAlbumName = selectedAlbum.title;
+          }
+        }
+        // Fallback to existing pendingAlbumName if nothing new
+        if (!resolvedPendingAlbumName) {
+          resolvedPendingAlbumName = currentState?.pendingAlbumName || null;
+        }
+        
         newMap.set(currentFileIndex, {
           title,
           albumId,
@@ -152,19 +182,43 @@ const SongCreate = (): React.ReactElement => {
           searchQuery,
           searchResults: [...searchResults],
           showResults,
+          // Preserve pendingArtistNames if they exist
+          pendingArtistNames:
+            pendingArtistNames.length > 0
+              ? [...pendingArtistNames]
+              : currentState?.pendingArtistNames,
+          // Preserve pendingAlbumName - use new value if set, otherwise keep existing
+          pendingAlbumName: resolvedPendingAlbumName,
+          // Preserve pendingAlbumCoverArt
+          pendingAlbumCoverArt:
+            pendingAlbumCoverArt !== null
+              ? pendingAlbumCoverArt
+              : currentState?.pendingAlbumCoverArt || null,
         });
+
+        // Increment version to trigger sync useEffect
+        setFileFormStatesVersion((v) => v + 1);
+
         return newMap;
       });
 
       // Update incomplete files set - remove from incomplete if now complete
-      const isComplete = !!(title.trim() && artistId);
-      if (isComplete) {
-        setIncompleteFiles((prev) => {
-          const newSet = new Set(prev);
+      // A file is complete if it has a title AND (an artistId OR pending artist names)
+      const currentState = fileFormStates.get(currentFileIndex);
+      const hasPendingArtists =
+        currentState?.pendingArtistNames &&
+        currentState.pendingArtistNames.length > 0;
+      const isComplete = !!(title.trim() && (artistId || hasPendingArtists));
+
+      setIncompleteFiles((prev) => {
+        const newSet = new Set(prev);
+        if (isComplete) {
           newSet.delete(currentFileIndex);
-          return newSet;
-        });
-      }
+        } else {
+          newSet.add(currentFileIndex);
+        }
+        return newSet;
+      });
     }
   }, [
     title,
@@ -175,9 +229,40 @@ const SongCreate = (): React.ReactElement => {
     searchQuery,
     searchResults,
     showResults,
+    pendingArtistNames,
+    pendingAlbumName,
+    pendingAlbumCoverArt,
+    albums,
     currentFileIndex,
     files.length,
   ]);
+
+  // Keep incompleteFiles in sync with fileFormStates (for button validation)
+  // Use fileFormStatesVersion instead of fileFormStates in deps to ensure we run after state updates
+  useEffect(() => {
+    // Don't sync if we're currently restoring state
+    if (isRestoringStateRef.current) {
+      return;
+    }
+
+    if (files.length > 1) {
+      const incomplete = new Set<number>();
+      for (let i = 0; i < files.length; i++) {
+        const state = fileFormStates.get(i);
+        // A file is complete if it has a title AND (an artistId OR pending artist names)
+        const hasPendingArtists =
+          state?.pendingArtistNames && state.pendingArtistNames.length > 0;
+        const isComplete = state
+          ? !!(state.title.trim() && (state.artistId || hasPendingArtists))
+          : false;
+        if (!isComplete) {
+          incomplete.add(i);
+        }
+      }
+
+      setIncompleteFiles(incomplete);
+    }
+  }, [fileFormStatesVersion, files.length, fileFormStates]);
 
   // When files are selected, extract metadata and set current file
   const handleFilesSelected = async (selectedFiles: FileList | null) => {
@@ -195,6 +280,15 @@ const SongCreate = (): React.ReactElement => {
         duration: string;
         objectUrl: string;
         durationSeconds: number;
+        coverArt?: string;
+      }
+    >();
+    const id3MetadataMap = new Map<
+      number,
+      {
+        title?: string;
+        artist?: string;
+        album?: string;
         coverArt?: string;
       }
     >();
@@ -218,18 +312,22 @@ const SongCreate = (): React.ReactElement => {
             const minutes = Math.floor((durationSeconds % 3600) / 60);
             const seconds = durationSeconds % 60;
             const durationStr = `${String(hours).padStart(2, "0")}:${String(
-              minutes
+              minutes,
             ).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
             resolve({ durationStr, durationSeconds });
           });
           audio.addEventListener("error", reject);
         });
 
-        // Try to extract cover art from ID3 tags
+        // Try to extract metadata from ID3 tags (cover art, album, artist, title)
+        let id3Album: string | undefined;
+        let id3Artist: string | undefined;
+        let id3Title: string | undefined;
         try {
           const { parseBuffer } = await import("music-metadata");
           const arrayBuffer = await file.arrayBuffer();
           const metadata = await parseBuffer(new Uint8Array(arrayBuffer));
+
 
           if (metadata.common.picture && metadata.common.picture.length > 0) {
             const picture = metadata.common.picture[0];
@@ -238,9 +336,20 @@ const SongCreate = (): React.ReactElement => {
             const format = picture.format || "image/jpeg";
             coverArt = `data:${format};base64,${base64}`;
           }
+
+          // Extract album, artist, and title from ID3 tags
+          if (metadata.common.album) {
+            id3Album = metadata.common.album;
+          }
+          if (metadata.common.artist) {
+            id3Artist = metadata.common.artist;
+          }
+          if (metadata.common.title) {
+            id3Title = metadata.common.title;
+          }
         } catch (coverArtError) {
-          // Ignore cover art extraction errors
-          console.debug(`No cover art found for ${file.name}`);
+          // Ignore metadata extraction errors
+          console.debug(`No metadata found for ${file.name}`);
         }
 
         metadataMap.set(i, {
@@ -249,6 +358,17 @@ const SongCreate = (): React.ReactElement => {
           durationSeconds,
           coverArt,
         });
+
+        // Store ID3 metadata for later use
+        if (id3Title || id3Artist || id3Album || coverArt) {
+          id3MetadataMap.set(i, {
+            title: id3Title,
+            artist: id3Artist,
+            album: id3Album,
+            coverArt,
+          });
+        } else {
+        }
       } catch (err) {
         console.error(`Error extracting duration for file ${file.name}:`, err);
         // Still create object URL even if duration extraction fails
@@ -262,22 +382,76 @@ const SongCreate = (): React.ReactElement => {
       }
     }
 
+    // Initialize file form states with ID3 metadata
+    setFileFormStates((prev) => {
+      const newMap = new Map(prev);
+      for (let i = 0; i < fileArray.length; i++) {
+        const id3Data = id3MetadataMap.get(i);
+        if (id3Data) {
+          const existingState = newMap.get(i);
+          const pendingAlbumName = id3Data.album || existingState?.pendingAlbumName || null;
+          const pendingArtistNames = id3Data.artist
+            ? splitArtistNames(id3Data.artist)
+                .map((name) => name.trim())
+                .filter(Boolean)
+            : existingState?.pendingArtistNames;
+          newMap.set(i, {
+            title: id3Data.title || existingState?.title || "",
+            albumId: existingState?.albumId || "",
+            artistId: existingState?.artistId || "",
+            coverImage: id3Data.coverArt || existingState?.coverImage || "",
+            selectedArtistIds: existingState?.selectedArtistIds || [],
+            searchQuery: existingState?.searchQuery || "",
+            searchResults: existingState?.searchResults || [],
+            showResults: existingState?.showResults || false,
+            // Store ID3 metadata as pending values (will be created on submission)
+            pendingArtistNames,
+            pendingAlbumName,
+            pendingAlbumCoverArt: id3Data.coverArt || existingState?.pendingAlbumCoverArt || null,
+          });
+        }
+      }
+      setFileFormStatesVersion((v) => v + 1);
+      return newMap;
+    });
+
     setFileMetadata(metadataMap);
 
     // Mark all files as incomplete initially
     const allIncomplete = new Set(fileArray.map((_, i) => i));
     setIncompleteFiles(allIncomplete);
 
-    // Set the first file as current
+    // Set the first file as current and sync ID3 metadata
     if (fileArray.length > 0) {
       setCurrentFileIndex(0);
       setFile(fileArray[0]);
       const firstMetadata = metadataMap.get(0);
+      const firstId3Data = id3MetadataMap.get(0);
       if (firstMetadata) {
         setDuration(firstMetadata.duration);
         // Set cover image from embedded cover art if available
         if (firstMetadata.coverArt) {
           setCoverImage(firstMetadata.coverArt);
+        }
+      }
+      // Sync ID3 metadata to main form state for first file
+      if (firstId3Data) {
+        if (firstId3Data.title) {
+          setTitle(firstId3Data.title);
+        }
+        if (firstId3Data.artist) {
+          const artistNames = splitArtistNames(firstId3Data.artist)
+            .map((name) => name.trim())
+            .filter(Boolean);
+          if (artistNames.length > 0) {
+            setPendingArtistNames(artistNames);
+          }
+        }
+        if (firstId3Data.album) {
+          setPendingAlbumName(firstId3Data.album);
+        }
+        if (firstId3Data.coverArt) {
+          setPendingAlbumCoverArt(firstId3Data.coverArt);
         }
       }
     }
@@ -374,6 +548,7 @@ const SongCreate = (): React.ReactElement => {
 
     setFileFormStates((prev) => {
       const newMap = new Map(prev);
+      const currentState = prev.get(fileIndex);
       newMap.set(fileIndex, {
         title,
         albumId,
@@ -383,10 +558,29 @@ const SongCreate = (): React.ReactElement => {
         searchQuery,
         searchResults: [...searchResults],
         showResults,
+        // Save pending artist names and album info from global state
+        pendingArtistNames:
+          pendingArtistNames.length > 0
+            ? [...pendingArtistNames]
+            : currentState?.pendingArtistNames,
+        pendingAlbumName:
+          pendingAlbumName !== null
+            ? pendingAlbumName
+            : currentState?.pendingAlbumName,
+        pendingAlbumCoverArt:
+          pendingAlbumCoverArt !== null
+            ? pendingAlbumCoverArt
+            : currentState?.pendingAlbumCoverArt,
       });
+      // Increment version to trigger sync useEffect
+      setFileFormStatesVersion((v) => v + 1);
       return newMap;
     });
   };
+
+  // Ref to track when we're restoring state (to prevent useEffect from overwriting)
+  const isRestoringStateRef = useRef(false);
+  const restoringFileIndexRef = useRef<number | null>(null);
 
   // Handle clicking on a file to set it as current
   const handleFileClick = (index: number) => {
@@ -402,6 +596,10 @@ const SongCreate = (): React.ReactElement => {
     }
     setPlayingFileIndex(null);
 
+    // Set flags to prevent useEffect from overwriting restored state
+    isRestoringStateRef.current = true;
+    restoringFileIndexRef.current = index;
+
     setCurrentFileIndex(index);
     setFile(files[index]);
     const metadata = fileMetadata.get(index);
@@ -412,6 +610,7 @@ const SongCreate = (): React.ReactElement => {
     // Restore form state for the selected file, or reset if no saved state
     const savedState = fileFormStates.get(index);
     if (savedState) {
+      // Use React's batching to update all state at once
       setTitle(savedState.title);
       setAlbumId(savedState.albumId);
       setArtistId(savedState.artistId);
@@ -421,9 +620,32 @@ const SongCreate = (): React.ReactElement => {
       setSearchQuery(savedState.searchQuery);
       setSearchResults(savedState.searchResults);
       setShowResults(savedState.showResults);
+      // Restore pending artist names from saved state
+      if (
+        savedState.pendingArtistNames &&
+        savedState.pendingArtistNames.length > 0
+      ) {
+        setPendingArtistNames([...savedState.pendingArtistNames]);
+      } else {
+        setPendingArtistNames([]);
+      }
+      // Restore pending album info from saved state
+      if (savedState.pendingAlbumName !== undefined) {
+        setPendingAlbumName(savedState.pendingAlbumName);
+      }
+      if (savedState.pendingAlbumCoverArt !== undefined) {
+        setPendingAlbumCoverArt(savedState.pendingAlbumCoverArt);
+      }
 
       // Update incomplete files set based on restored state
-      const isComplete = !!(savedState.title.trim() && savedState.artistId);
+      // A file is complete if it has a title AND (an artistId OR pending artist names)
+      const hasPendingArtists =
+        savedState.pendingArtistNames &&
+        savedState.pendingArtistNames.length > 0;
+      const isComplete = !!(
+        savedState.title.trim() &&
+        (savedState.artistId || hasPendingArtists)
+      );
       setIncompleteFiles((prev) => {
         const newSet = new Set(prev);
         if (isComplete) {
@@ -444,6 +666,10 @@ const SongCreate = (): React.ReactElement => {
       setSearchQuery("");
       setSearchResults([]);
       setShowResults(false);
+      // Clear pending artist names and album info when switching to a file with no saved state
+      setPendingArtistNames([]);
+      setPendingAlbumName(null);
+      setPendingAlbumCoverArt(null);
 
       // Mark as incomplete
       setIncompleteFiles((prev) => {
@@ -452,6 +678,13 @@ const SongCreate = (): React.ReactElement => {
         return newSet;
       });
     }
+
+    // Clear the flags after state updates (use setTimeout to ensure it runs after all state updates)
+    setTimeout(() => {
+      isRestoringStateRef.current = false;
+      restoringFileIndexRef.current = null;
+    }, 0);
+
     setError(null);
   };
 
@@ -557,7 +790,7 @@ const SongCreate = (): React.ReactElement => {
           setArtistId(savedState.artistId);
           // Use saved cover image, or fall back to embedded cover art if no saved image
           setCoverImage(
-            savedState.coverImage || currentMetadata?.coverArt || ""
+            savedState.coverImage || currentMetadata?.coverArt || "",
           );
           setSelectedArtistIds(savedState.selectedArtistIds);
           setSearchQuery(savedState.searchQuery);
@@ -581,7 +814,7 @@ const SongCreate = (): React.ReactElement => {
   // Handle progress bar seek
   const handleProgressSeek = (
     index: number,
-    e: React.MouseEvent<HTMLDivElement>
+    e: React.MouseEvent<HTMLDivElement>,
   ) => {
     e.stopPropagation();
     const metadata = fileMetadata.get(index);
@@ -607,16 +840,16 @@ const SongCreate = (): React.ReactElement => {
         // Filter out items without IDs since the UI requires them
         setAlbums(
           albums.filter(
-            (a): a is Album & { album_id: number } => a.album_id !== undefined
-          )
+            (a): a is Album & { album_id: number } => a.album_id !== undefined,
+          ),
         );
         setArtists(
           artists.filter(
             (a): a is Artist & { artist_id: number } =>
-              a.artist_id !== undefined
-          )
+              a.artist_id !== undefined,
+          ),
         );
-      }
+      },
     );
   }, []);
 
@@ -646,7 +879,7 @@ const SongCreate = (): React.ReactElement => {
 
   const isBandcampArtistMismatch = (
     artistName: string,
-    pageUrl?: string
+    pageUrl?: string,
   ): boolean => {
     if (!artistName || !pageUrl) return false;
     try {
@@ -677,12 +910,12 @@ const SongCreate = (): React.ReactElement => {
   };
 
   const fetchBandcampArtistImage = async (
-    artistName: string
+    artistName: string,
   ): Promise<{ imageUrl: string; sourceUrl: string | null } | null> => {
     if (!artistName || !artistName.trim()) return null;
     try {
       const response = await fetch(
-        `/api/bandcamp-artist-image?artist=${encodeURIComponent(artistName)}`
+        `/api/bandcamp-artist-image?artist=${encodeURIComponent(artistName)}`,
       );
       if (!response.ok) return null;
       const data = await response.json();
@@ -719,11 +952,11 @@ const SongCreate = (): React.ReactElement => {
 
   // Extract Bandcamp metadata from backend
   const extractBandcampMetadata = async (
-    url: string
+    url: string,
   ): Promise<SearchResult | null> => {
     try {
       const response = await fetch(
-        `/api/bandcamp-metadata?url=${encodeURIComponent(url)}`
+        `/api/bandcamp-metadata?url=${encodeURIComponent(url)}`,
       );
       if (!response.ok) {
         const errorData = await response
@@ -731,7 +964,7 @@ const SongCreate = (): React.ReactElement => {
           .catch(() => ({ error: response.statusText }));
         throw new Error(
           errorData.error ||
-            `Failed to fetch Bandcamp metadata: ${response.statusText}`
+            `Failed to fetch Bandcamp metadata: ${response.statusText}`,
         );
       }
       const data = await response.json();
@@ -768,7 +1001,7 @@ const SongCreate = (): React.ReactElement => {
 
     // Extract from Spotify track URL: open.spotify.com/track/TRACK_ID
     const trackUrlMatch = trimmed.match(
-      /open\.spotify\.com\/track\/([a-zA-Z0-9]+)/i
+      /open\.spotify\.com\/track\/([a-zA-Z0-9]+)/i,
     );
     if (trackUrlMatch) {
       return trackUrlMatch[1];
@@ -791,7 +1024,7 @@ const SongCreate = (): React.ReactElement => {
   // Split artist names on common separators and normalize
   const splitArtistNames = (
     raw: string,
-    options?: { includeFeaturing?: boolean }
+    options?: { includeFeaturing?: boolean },
   ): string[] => {
     if (!raw) return [];
     const includeFeaturing = options?.includeFeaturing !== false;
@@ -822,13 +1055,13 @@ const SongCreate = (): React.ReactElement => {
 
   // Validate and fetch a reliable artist image from Spotify
   const validateAndGetArtistImage = async (
-    artistId: string
+    artistId: string,
   ): Promise<{ imageUrl: string; sourceUrl: string | null } | null> => {
     try {
       const response = await fetch(`/api/spotify-artist/${artistId}`);
       if (!response.ok) {
         console.warn(
-          `Failed to fetch artist ${artistId} from Spotify: ${response.status} ${response.statusText}`
+          `Failed to fetch artist ${artistId} from Spotify: ${response.status} ${response.statusText}`,
         );
         return null;
       }
@@ -837,7 +1070,7 @@ const SongCreate = (): React.ReactElement => {
       const contentType = response.headers.get("content-type");
       if (!contentType || !contentType.includes("application/json")) {
         console.warn(
-          `Spotify API returned non-JSON response for artist ${artistId}: ${contentType}`
+          `Spotify API returned non-JSON response for artist ${artistId}: ${contentType}`,
         );
         return null;
       }
@@ -868,7 +1101,7 @@ const SongCreate = (): React.ReactElement => {
       // Handle JSON parsing errors (e.g., when API returns HTML error page)
       if (error instanceof SyntaxError && error.message.includes("JSON")) {
         console.warn(
-          `Spotify API returned invalid JSON for artist ${artistId} (likely HTML error page)`
+          `Spotify API returned invalid JSON for artist ${artistId} (likely HTML error page)`,
         );
       } else {
         console.error("Error validating artist image from Spotify:", error);
@@ -925,7 +1158,7 @@ const SongCreate = (): React.ReactElement => {
             if (result === null) {
               // It's an album - fetch the album data separately
               const response = await fetch(
-                `/api/bandcamp-metadata?url=${encodeURIComponent(trimmedQuery)}`
+                `/api/bandcamp-metadata?url=${encodeURIComponent(trimmedQuery)}`,
               );
               if (!response.ok) {
                 throw new Error("Failed to fetch album data");
@@ -974,7 +1207,7 @@ const SongCreate = (): React.ReactElement => {
             }
 
             const response = await fetch(
-              `/api/bandcamp-search?q=${encodeURIComponent(trimmedQuery)}`
+              `/api/bandcamp-search?q=${encodeURIComponent(trimmedQuery)}`,
             );
             if (!response.ok) {
               throw new Error("Failed to search Bandcamp");
@@ -991,8 +1224,8 @@ const SongCreate = (): React.ReactElement => {
                   try {
                     const metaResp = await fetch(
                       `/api/bandcamp-metadata?url=${encodeURIComponent(
-                        item.url
-                      )}`
+                        item.url,
+                      )}`,
                     );
                     if (metaResp.ok) {
                       const meta = await metaResp.json();
@@ -1006,7 +1239,7 @@ const SongCreate = (): React.ReactElement => {
                       console.warn(
                         "Failed to fetch cover art for album:",
                         item.url,
-                        e
+                        e,
                       );
                     }
                   }
@@ -1022,7 +1255,7 @@ const SongCreate = (): React.ReactElement => {
                     source: "bandcamp",
                   },
                 };
-              }
+              },
             );
 
             const results = await Promise.all(resultsPromises);
@@ -1058,7 +1291,7 @@ const SongCreate = (): React.ReactElement => {
             // Use search API for regular text queries
             const term = encodeURIComponent(trimmedQuery);
             const response = await fetch(
-              `/api/spotify-search?q=${term}&type=track&limit=25`
+              `/api/spotify-search?q=${term}&type=track&limit=25`,
             );
             if (!response.ok) {
               throw new Error(`Spotify API error: ${response.statusText}`);
@@ -1102,7 +1335,7 @@ const SongCreate = (): React.ReactElement => {
                   artistNameToIdMap: artistNameToIdMap,
                 },
               };
-            }
+            },
           );
 
           setSearchResults(results);
@@ -1114,7 +1347,7 @@ const SongCreate = (): React.ReactElement => {
           err.message ||
             (addMode === "bandcamp"
               ? "Failed to extract metadata from Bandcamp URL"
-              : "Failed to search Spotify")
+              : "Failed to search Spotify"),
         );
         setSearchResults([]);
       } finally {
@@ -1183,7 +1416,7 @@ const SongCreate = (): React.ReactElement => {
       // (even if we already have a valid audio URL)
       try {
         const resp = await fetch(
-          `/api/bandcamp-metadata?url=${encodeURIComponent(bandcampUrl)}`
+          `/api/bandcamp-metadata?url=${encodeURIComponent(bandcampUrl)}`,
         );
         if (!resp.ok) {
           throw new Error("Failed to extract Bandcamp metadata from URL");
@@ -1238,7 +1471,7 @@ const SongCreate = (): React.ReactElement => {
         if (import.meta.env.DEV) {
           console.warn(
             "Failed to extract Bandcamp metadata from search result URL:",
-            e
+            e,
           );
         }
       }
@@ -1265,7 +1498,7 @@ const SongCreate = (): React.ReactElement => {
       } else {
         // If we couldn't extract a valid audio URL, show an error
         setError(
-          "Could not extract audio stream URL from Bandcamp. Unfortunately, this track may not be available for streaming. Please try uploading an audio file instead."
+          "Could not extract audio stream URL from Bandcamp. Unfortunately, this track may not be available for streaming. Please try uploading an audio file instead.",
         );
         setSongUrl(""); // Don't store invalid URL
         if (import.meta.env.DEV) {
@@ -1273,7 +1506,7 @@ const SongCreate = (): React.ReactElement => {
             "Failed to extract valid audio URL from Bandcamp page. Got:",
             audioStreamUrl,
             "Page URL:",
-            bandcampUrl
+            bandcampUrl,
           );
         }
       }
@@ -1324,7 +1557,7 @@ const SongCreate = (): React.ReactElement => {
         const mainArtistNames = splitArtistNames(result.artist || "");
         const featuredFromTitle = extractFeaturedFromTitle(result.title || "");
         const allNames = Array.from(
-          new Set([...mainArtistNames, ...featuredFromTitle])
+          new Set([...mainArtistNames, ...featuredFromTitle]),
         );
 
         // Fallback: if parsing failed, use raw artist string as single artist
@@ -1332,8 +1565,8 @@ const SongCreate = (): React.ReactElement => {
           allNames.length > 0 && mainArtistNames.length > 0
             ? allNames
             : result.artist
-            ? [result.artist]
-            : [];
+              ? [result.artist]
+              : [];
 
         if (import.meta.env.DEV) {
           console.log("Parsed artists from Spotify result:", {
@@ -1376,7 +1609,7 @@ const SongCreate = (): React.ReactElement => {
       for (const name of effectiveNames) {
         const normalizedName = normalizeArtistName(name);
         const existing = artists.find(
-          (a) => normalizeArtistName(a.name) === normalizedName
+          (a) => normalizeArtistName(a.name) === normalizedName,
         );
         if (existing?.artist_id != null) {
           existingArtistIds.push(existing.artist_id);
@@ -1411,6 +1644,34 @@ const SongCreate = (): React.ReactElement => {
         setPendingAlbumCoverArt(null);
         setAlbumId("");
       }
+
+      // In multi-file mode, immediately save the current form state after setting metadata
+      // This ensures the state is saved even if the user switches files before the useEffect runs
+      if (files.length > 1 && currentFileIndex !== null) {
+        // Save pending artist names and album info to fileFormState so validation can check for them
+        setFileFormStates((prev) => {
+          const newMap = new Map(prev);
+          const currentState = newMap.get(currentFileIndex) || {
+            title,
+            albumId,
+            artistId,
+            coverImage,
+            selectedArtistIds: [...selectedArtistIds],
+            searchQuery,
+            searchResults: [...searchResults],
+            showResults,
+          };
+          newMap.set(currentFileIndex, {
+            ...currentState,
+            pendingArtistNames:
+              effectiveNames.length > 0 ? effectiveNames : undefined,
+            pendingAlbumName: bandcampAlbum || null,
+            pendingAlbumCoverArt: bandcampCoverArt || null,
+          });
+          setFileFormStatesVersion((v) => v + 1);
+          return newMap;
+        });
+      }
     } catch (err: any) {
       console.error("Error setting metadata:", err);
       setError(err.message || "Failed to set metadata");
@@ -1421,7 +1682,10 @@ const SongCreate = (): React.ReactElement => {
   const isFileComplete = (fileIndex: number): boolean => {
     const state = fileFormStates.get(fileIndex);
     if (!state) return false;
-    return !!(state.title.trim() && state.artistId);
+    // A file is complete if it has a title AND (an artistId OR pending artist names)
+    const hasPendingArtists =
+      state.pendingArtistNames && state.pendingArtistNames.length > 0;
+    return !!(state.title.trim() && (state.artistId || hasPendingArtists));
   };
 
   // Validate all files when in multi-file mode
@@ -1453,7 +1717,7 @@ const SongCreate = (): React.ReactElement => {
         setError(
           `${incompleteCount} file${
             incompleteCount !== 1 ? "s" : ""
-          } missing required metadata. Please fill in title and artist for all files.`
+          } missing required metadata. Please fill in title and artist for all files.`,
         );
         // Scroll to first incomplete file
         const firstIncomplete = Array.from(incompleteFiles)[0];
@@ -1500,7 +1764,7 @@ const SongCreate = (): React.ReactElement => {
     if (!finalDuration && songUrl) {
       // Try to get duration from search result if available
       const bandcampResult = searchResults.find(
-        (r) => r.raw?.audioUrl === songUrl || r.raw?.url
+        (r) => r.raw?.audioUrl === songUrl || r.raw?.url,
       );
       if (bandcampResult?.raw?.duration) {
         finalDuration = bandcampResult.raw.duration;
@@ -1510,7 +1774,7 @@ const SongCreate = (): React.ReactElement => {
       }
     } else if (!finalDuration && file) {
       setError(
-        "Duration could not be extracted from the audio file. Please try again."
+        "Duration could not be extracted from the audio file. Please try again.",
       );
       return;
     }
@@ -1533,7 +1797,7 @@ const SongCreate = (): React.ReactElement => {
 
         // Helper to get or create artist
         const getOrCreateArtist = async (
-          rawName: string
+          rawName: string,
         ): Promise<Artist | null> => {
           const trimmedName = rawName.trim();
           if (!trimmedName) return null;
@@ -1546,7 +1810,7 @@ const SongCreate = (): React.ReactElement => {
 
           // Check if exists in database
           const existing = artists.find(
-            (a) => normalizeArtistName(a.name) === normalizedName
+            (a) => normalizeArtistName(a.name) === normalizedName,
           );
           if (existing) {
             createdArtistsByName.set(normalizedName, existing);
@@ -1583,16 +1847,14 @@ const SongCreate = (): React.ReactElement => {
               let spotifyArtistId: string | undefined =
                 pendingArtistNameToIdMap.get(artistName);
 
-              // Fallback to index-based matching if name lookup fails
-              if (!spotifyArtistId && index < pendingSpotifyArtistIds.length) {
-                spotifyArtistId = pendingSpotifyArtistIds[index];
-              }
+              // REMOVED: Index-based fallback is unsafe - can match wrong artist
+              // If name lookup fails, we should not assign an image rather than risk wrong assignment
+              // The background service will fetch images later by name search
 
               if (spotifyArtistId) {
                 try {
-                  const validated = await validateAndGetArtistImage(
-                    spotifyArtistId
-                  );
+                  const validated =
+                    await validateAndGetArtistImage(spotifyArtistId);
                   if (validated?.imageUrl) {
                     await artistService.update(dbArtistId, {
                       image_url: validated.imageUrl,
@@ -1609,19 +1871,19 @@ const SongCreate = (): React.ReactElement => {
                               image_source_url: validated.sourceUrl,
                               image_source_provider: "spotify",
                             }
-                          : a
-                      )
+                          : a,
+                      ),
                     );
                   }
                 } catch (err) {
                   console.error(
                     `Error updating artist image from Spotify for "${artistName}":`,
-                    err
+                    err,
                   );
                   // Don't fail the whole operation if image validation fails
                 }
               }
-            }
+            },
           );
 
           // Wait for all image updates to complete (but don't block on errors)
@@ -1648,8 +1910,8 @@ const SongCreate = (): React.ReactElement => {
                         image_source_url: sourceUrl,
                         image_source_provider: "bandcamp",
                       }
-                    : a
-                )
+                    : a,
+                ),
               );
             } catch (err) {
               console.error("Error updating artist image from Bandcamp:", err);
@@ -1720,7 +1982,7 @@ const SongCreate = (): React.ReactElement => {
               // Create or find album artist
               const normalizedName = normalizeArtistName(albumArtistName);
               const existingAlbumArtist = artists.find(
-                (a) => normalizeArtistName(a.name) === normalizedName
+                (a) => normalizeArtistName(a.name) === normalizedName,
               );
 
               if (existingAlbumArtist) {
@@ -1763,7 +2025,7 @@ const SongCreate = (): React.ReactElement => {
           } else {
             // Skip album creation if no valid artist ID available
             console.warn(
-              "Skipping album creation: no valid artist ID available"
+              "Skipping album creation: no valid artist ID available",
             );
           }
         }
@@ -1785,7 +2047,59 @@ const SongCreate = (): React.ReactElement => {
         let errorCount = 0;
         const errors: string[] = [];
 
+        // Track artists and albums created in this batch to prevent duplicates
+        const createdArtistsInBatch = new Map<string, Artist>();
+        const createdAlbumsInBatch = new Map<string, Album & { album_id: number }>();
+
+        // Helper to get or create artist (reused for each file)
+        const getOrCreateArtist = async (
+          rawName: string,
+        ): Promise<Artist | null> => {
+          const trimmedName = rawName.trim();
+          if (!trimmedName) {
+            return null;
+          }
+          const normalizedName = normalizeArtistName(trimmedName);
+
+
+          // Check if already created in this batch
+          if (createdArtistsInBatch.has(normalizedName)) {
+            return createdArtistsInBatch.get(normalizedName)!;
+          }
+
+          // Check if exists in database - query directly instead of relying on stale state
+          // First check state (fast), then query DB if not found (more reliable)
+          let existing = artists.find(
+            (a) => normalizeArtistName(a.name) === normalizedName,
+          );
+          
+          // If not found in state, query database directly to avoid stale state issues
+          if (!existing) {
+            const allArtists = await artistService.getAll();
+            existing = allArtists.find(
+              (a) => normalizeArtistName(a.name) === normalizedName,
+            );
+          }
+          
+          if (existing) {
+            createdArtistsInBatch.set(normalizedName, existing);
+            return existing;
+          }
+
+
+          // Create new artist
+          const newId = await artistService.create({ name: trimmedName });
+          const artist = { artist_id: newId, name: trimmedName };
+          createdArtistsInBatch.set(normalizedName, artist);
+          setArtists((prev) => [...prev, artist]);
+          
+          return artist;
+        };
+
         for (let i = 0; i < files.length; i++) {
+          // Update currentFileIndex to show progress in UI
+          setCurrentFileIndex(i);
+          
           const fileToSubmit = files[i];
           const fileState = fileFormStates.get(i);
           const fileMeta = fileMetadata.get(i);
@@ -1796,13 +2110,132 @@ const SongCreate = (): React.ReactElement => {
             continue;
           }
 
-          if (!fileState.title.trim() || !fileState.artistId) {
+
+          // Check for title and (artistId OR pendingArtistNames)
+          const hasPendingArtists =
+            fileState.pendingArtistNames &&
+            fileState.pendingArtistNames.length > 0;
+          if (
+            !fileState.title.trim() ||
+            (!fileState.artistId && !hasPendingArtists)
+          ) {
             errorCount++;
             errors.push(`File ${i + 1}: Missing required fields`);
             continue;
           }
 
           try {
+            // If we have pending artists, create them first
+            let finalArtistId: number | null = null;
+            let finalSelectedArtistIds: number[] = [];
+
+            if (hasPendingArtists && fileState.pendingArtistNames) {
+              // Filter out empty artist names before processing
+              const validArtistNames = fileState.pendingArtistNames.filter(
+                (name) => name && name.trim().length > 0
+              );
+              // Create all pending artists
+              const allArtistIds: number[] = [];
+              for (const name of validArtistNames) {
+                const artist = await getOrCreateArtist(name);
+                if (artist?.artist_id != null) {
+                  allArtistIds.push(artist.artist_id);
+                  if (finalArtistId == null) {
+                    finalArtistId = artist.artist_id;
+                  }
+                }
+              }
+              finalSelectedArtistIds = allArtistIds;
+            } else if (fileState.artistId) {
+              // Use existing artistId
+              finalArtistId = parseInt(fileState.artistId);
+              finalSelectedArtistIds = Array.from(
+                new Set([finalArtistId, ...fileState.selectedArtistIds]),
+              );
+            }
+
+            if (!finalArtistId) {
+              errorCount++;
+              errors.push(`File ${i + 1}: Failed to resolve artist ID`);
+              continue;
+            }
+
+            // Handle album creation if we have pending album name
+            let finalAlbumId: number | null = null;
+            
+            // If we have albumId but no pendingAlbumName, look up the album name
+            // This handles the case where user selected an album from dropdown
+            let resolvedPendingAlbumName = fileState.pendingAlbumName;
+            if (!resolvedPendingAlbumName && fileState.albumId) {
+              const selectedAlbum = albums.find(
+                (a) => a.album_id?.toString() === fileState.albumId
+              );
+              if (selectedAlbum?.title) {
+                resolvedPendingAlbumName = selectedAlbum.title;
+              }
+              // If still not found, query database
+              if (!resolvedPendingAlbumName && fileState.albumId) {
+                const allAlbums = await albumService.getAll();
+                const foundAlbum = allAlbums.find(
+                  (a) => a.album_id?.toString() === fileState.albumId
+                );
+                if (foundAlbum?.title) {
+                  resolvedPendingAlbumName = foundAlbum.title;
+                }
+              }
+            }
+            
+            if (resolvedPendingAlbumName) {
+              
+              // Validate album name is not empty
+              const trimmedAlbumName = resolvedPendingAlbumName.trim();
+              if (!trimmedAlbumName) {
+                // Skip album creation if name is empty
+              } else {
+                // Check if already created in this batch
+                let album = createdAlbumsInBatch.get(trimmedAlbumName);
+                
+                if (!album) {
+                  // Check if album already exists in database - query directly to avoid stale state
+                  album = albums.find(
+                    (a) => a.title === trimmedAlbumName,
+                  ) as Album & { album_id: number } | undefined;
+                  
+                  // If not found in state, query database directly
+                  if (!album) {
+                    const allAlbums = await albumService.getAll();
+                    album = allAlbums.find(
+                      (a) => a.title === trimmedAlbumName,
+                    ) as Album & { album_id: number } | undefined;
+                  }
+                }
+
+                if (!album) {
+                  // Create album with the resolved artist
+                  const albumId = await albumService.create({
+                    title: trimmedAlbumName,
+                    artist_id: finalArtistId,
+                    cover_image: fileState.pendingAlbumCoverArt || null,
+                  });
+                  album = {
+                    album_id: albumId,
+                    title: trimmedAlbumName,
+                    artist_id: finalArtistId,
+                    cover_image: fileState.pendingAlbumCoverArt || null,
+                  };
+                  createdAlbumsInBatch.set(trimmedAlbumName, album);
+                  setAlbums((prev) => [
+                    ...prev,
+                    album as Album & { album_id: number },
+                  ]);
+                } else {
+                }
+                finalAlbumId = album.album_id;
+              }
+            } else if (fileState.albumId) {
+              finalAlbumId = parseInt(fileState.albumId);
+            }
+
             // Read file as Blob
             const fileBlob = await fileToSubmit
               .arrayBuffer()
@@ -1811,8 +2244,8 @@ const SongCreate = (): React.ReactElement => {
             // Create song in IndexedDB
             const newSongId = await songService.create({
               title: fileState.title.trim(),
-              artist_id: parseInt(fileState.artistId),
-              album_id: fileState.albumId ? parseInt(fileState.albumId) : null,
+              artist_id: finalArtistId,
+              album_id: finalAlbumId,
               duration: fileMeta.duration,
               file_blob: fileBlob,
               url: null,
@@ -1821,31 +2254,32 @@ const SongCreate = (): React.ReactElement => {
             });
 
             // Associate artists with this song (many-to-many)
-            const primaryId = parseInt(fileState.artistId);
-            const artistIdsToAssociate = Array.from(
-              new Set([primaryId, ...fileState.selectedArtistIds])
-            );
-
             await songArtistService.setArtistsForSong(
               newSongId,
-              artistIdsToAssociate
+              finalSelectedArtistIds,
             );
 
             successCount++;
           } catch (err: any) {
             errorCount++;
             errors.push(
-              `File ${i + 1}: ${err.message || "Failed to create song"}`
+              `File ${i + 1}: ${err.message || "Failed to create song"}`,
             );
             console.error(`Error creating song for file ${i + 1}:`, err);
           }
         }
 
+
+        // Reset currentFileIndex after upload completes
+        setCurrentFileIndex(null);
+
+        setLoading(false);
+        
         if (errorCount > 0) {
           setError(
             `Successfully added ${successCount} song(s). ${errorCount} song(s) failed:\n${errors.join(
-              "\n"
-            )}`
+              "\n",
+            )}`,
           );
           // Don't navigate if there were errors - let user see the error
           if (successCount === 0) {
@@ -1901,7 +2335,7 @@ const SongCreate = (): React.ReactElement => {
       // Associate artists with this song (many-to-many)
       // Always associate all detected artists; Bandcamp uses explicit separators only
       const artistIdsToAssociate = Array.from(
-        new Set([finalArtistId, ...finalSelectedArtistIds])
+        new Set([finalArtistId, ...finalSelectedArtistIds]),
       );
 
       if (import.meta.env.DEV) {
@@ -1917,7 +2351,7 @@ const SongCreate = (): React.ReactElement => {
 
       await songArtistService.setArtistsForSong(
         newSongId,
-        artistIdsToAssociate
+        artistIdsToAssociate,
       );
 
       navigate("/songs");
@@ -1950,7 +2384,7 @@ const SongCreate = (): React.ReactElement => {
 
     if (validSelectedTracks.length === 0) {
       setError(
-        "No tracks with valid audio URLs selected. Please select tracks that have audio available."
+        "No tracks with valid audio URLs selected. Please select tracks that have audio available.",
       );
       return;
     }
@@ -1999,18 +2433,18 @@ const SongCreate = (): React.ReactElement => {
 
           const hasArtistMismatch = isBandcampArtistMismatch(
             primaryAlbumArtist.name,
-            albumResult.pageUrl
+            albumResult.pageUrl,
           );
 
           if (hasArtistMismatch) {
             try {
               const bandcampImage = await fetchBandcampArtistImage(
-                primaryAlbumArtist.name
+                primaryAlbumArtist.name,
               );
               const resolvedImage = await artistImageService.fetchArtistImage(
                 primaryAlbumArtist.name,
                 bandcampImage?.imageUrl,
-                bandcampImage?.sourceUrl || undefined
+                bandcampImage?.sourceUrl || undefined,
               );
 
               if (resolvedImage?.imageUrl) {
@@ -2034,8 +2468,8 @@ const SongCreate = (): React.ReactElement => {
                           image_source_url: resolvedImage.sourceUrl,
                           image_source_provider: resolvedImage.sourceProvider,
                         }
-                      : a
-                  )
+                      : a,
+                  ),
                 );
               }
             } catch (err) {
@@ -2066,8 +2500,8 @@ const SongCreate = (): React.ReactElement => {
                         image_source_url: sourceUrl,
                         image_source_provider: "bandcamp",
                       }
-                    : a
-                )
+                    : a,
+                ),
               );
             } catch (err) {
               console.error("Error updating artist image:", err);
@@ -2088,7 +2522,7 @@ const SongCreate = (): React.ReactElement => {
       // Helper function to get or create artist(s) from a name string
       // Handles multiple artists separated by "/", "&", ",", etc.
       const getOrCreateArtists = async (
-        artistNameString: string
+        artistNameString: string,
       ): Promise<Artist[]> => {
         if (!artistNameString || !artistNameString.trim()) {
           return [];
@@ -2128,8 +2562,8 @@ const SongCreate = (): React.ReactElement => {
             try {
               const response = await fetch(
                 `/api/bandcamp-artist-image?artist=${encodeURIComponent(
-                  artistName
-                )}`
+                  artistName,
+                )}`,
               );
               if (response.ok) {
                 const data = await response.json();
@@ -2155,15 +2589,15 @@ const SongCreate = (): React.ReactElement => {
                             image_source_url: sourceUrl,
                             image_source_provider: "bandcamp",
                           }
-                        : a
-                    )
+                        : a,
+                    ),
                   );
                 }
               }
             } catch (err) {
               console.error(
                 `Error fetching Bandcamp image for ${artistName}:`,
-                err
+                err,
               );
               // Continue without image - Spotify fallback will handle it later
             }
@@ -2171,8 +2605,8 @@ const SongCreate = (): React.ReactElement => {
             try {
               const response = await fetch(
                 `/api/bandcamp-artist-image?artist=${encodeURIComponent(
-                  artistName
-                )}`
+                  artistName,
+                )}`,
               );
               if (response.ok) {
                 const data = await response.json();
@@ -2201,15 +2635,15 @@ const SongCreate = (): React.ReactElement => {
                               ? "bandcamp"
                               : null,
                           }
-                        : a
-                    )
+                        : a,
+                    ),
                   );
                 }
               }
             } catch (err) {
               console.error(
                 `Error backfilling Bandcamp source for ${artistName}:`,
-                err
+                err,
               );
             }
           }
@@ -2291,7 +2725,7 @@ const SongCreate = (): React.ReactElement => {
 
           if (!isValidAudioUrl) {
             console.warn(
-              `Skipping track "${track.title}" - no valid audio URL`
+              `Skipping track "${track.title}" - no valid audio URL`,
             );
             errorCount++;
             continue;
@@ -2348,7 +2782,7 @@ const SongCreate = (): React.ReactElement => {
           if (trackArtists.length === 0) {
             if (!albumArtistId) {
               throw new Error(
-                `Could not determine artist for track "${track.title}"`
+                `Could not determine artist for track "${track.title}"`,
               );
             }
             const albumArtist =
@@ -2363,7 +2797,7 @@ const SongCreate = (): React.ReactElement => {
           const primaryTrackArtistId = trackArtists[0]?.artist_id;
           if (!primaryTrackArtistId) {
             throw new Error(
-              `Could not determine artist for track "${track.title}"`
+              `Could not determine artist for track "${track.title}"`,
             );
           }
 
@@ -2392,7 +2826,7 @@ const SongCreate = (): React.ReactElement => {
       if (successCount > 0) {
         if (errorCount > 0) {
           setError(
-            `Added ${successCount} track(s) successfully. ${errorCount} track(s) could not be added (no valid audio URL found).`
+            `Added ${successCount} track(s) successfully. ${errorCount} track(s) could not be added (no valid audio URL found).`,
           );
           // Still navigate but show the error
           setTimeout(() => navigate("/songs"), 2000);
@@ -2405,7 +2839,7 @@ const SongCreate = (): React.ReactElement => {
             errorCount > 0
               ? `${errorCount} track(s) had errors - some tracks may not have valid audio URLs available from Bandcamp.`
               : ""
-          }`
+          }`,
         );
       }
     } catch (err: any) {
@@ -2446,7 +2880,7 @@ const SongCreate = (): React.ReactElement => {
       .filter((index): index is number => index !== null);
 
     const validSelectedCount = Array.from(selectedTracks).filter((index) =>
-      validTrackIndices.includes(index)
+      validTrackIndices.includes(index),
     ).length;
 
     if (validSelectedCount === validTrackIndices.length) {
@@ -2542,7 +2976,7 @@ const SongCreate = (): React.ReactElement => {
                   })
                   .filter((index): index is number => index !== null);
                 const validSelectedCount = Array.from(selectedTracks).filter(
-                  (index) => validTrackIndices.includes(index)
+                  (index) => validTrackIndices.includes(index),
                 ).length;
                 return validSelectedCount === validTrackIndices.length
                   ? "Deselect All"
@@ -2579,7 +3013,7 @@ const SongCreate = (): React.ReactElement => {
                         track.audioUrl.includes(".ogg") ||
                         track.audioUrl.includes(".flac"));
                     return isValidAudioUrl;
-                  }
+                  },
                 ).length;
                 return `${validSelectedCount} of ${validTrackCount} available selected`;
               })()}
@@ -2699,7 +3133,7 @@ const SongCreate = (): React.ReactElement => {
                 ? "Adding..."
                 : (() => {
                     const validSelectedCount = Array.from(
-                      selectedTracks
+                      selectedTracks,
                     ).filter((index) => {
                       const track = albumResult.tracks[index];
                       if (!track) return false;
@@ -2829,21 +3263,21 @@ const SongCreate = (): React.ReactElement => {
                             await new Promise((resolve, reject) => {
                               audio.addEventListener("loadedmetadata", () => {
                                 const durationSeconds = Math.floor(
-                                  audio.duration
+                                  audio.duration,
                                 );
                                 const hours = Math.floor(
-                                  durationSeconds / 3600
+                                  durationSeconds / 3600,
                                 );
                                 const minutes = Math.floor(
-                                  (durationSeconds % 3600) / 60
+                                  (durationSeconds % 3600) / 60,
                                 );
                                 const seconds = durationSeconds % 60;
 
                                 const durationStr = `${String(hours).padStart(
                                   2,
-                                  "0"
+                                  "0",
                                 )}:${String(minutes).padStart(2, "0")}:${String(
-                                  seconds
+                                  seconds,
                                 ).padStart(2, "0")}`;
 
                                 setDuration(durationStr);
@@ -2856,7 +3290,7 @@ const SongCreate = (): React.ReactElement => {
                             console.error("Error extracting duration:", err);
                             setDuration("");
                             setError(
-                              "Failed to extract duration from audio file. Please try another file."
+                              "Failed to extract duration from audio file. Please try another file.",
                             );
                           }
                         } else {
@@ -2879,8 +3313,8 @@ const SongCreate = (): React.ReactElement => {
                         files.length !== 1 ? "s" : ""
                       } selected`
                     : file
-                    ? file.name
-                    : "no file selected"}
+                      ? file.name
+                      : "no file selected"}
                 </div>
               </div>
               {duration && (
@@ -2913,11 +3347,19 @@ const SongCreate = (): React.ReactElement => {
                     const metadata = fileMetadata.get(index);
                     const isCurrent = currentFileIndex === index;
                     const isPlaying = playingFileIndex === index;
-                    const isIncomplete = incompleteFiles.has(index);
                     const fileState = fileFormStates.get(index);
+                    // A file is complete if it has a title AND (an artistId OR pending artist names)
+                    const hasPendingArtists =
+                      fileState?.pendingArtistNames &&
+                      fileState.pendingArtistNames.length > 0;
                     const isFileComplete = fileState
-                      ? !!(fileState.title.trim() && fileState.artistId)
+                      ? !!(
+                          fileState.title.trim() &&
+                          (fileState.artistId || hasPendingArtists)
+                        )
                       : false;
+                    // Calculate isIncomplete from fileFormStates to keep it in sync
+                    const isIncomplete = !isFileComplete;
                     const durationStr = metadata?.duration || "00:00:00";
                     const currentTime = playbackTimes.get(index) || 0;
                     const durationSeconds = metadata?.durationSeconds || 0;
@@ -2951,8 +3393,8 @@ const SongCreate = (): React.ReactElement => {
                           backgroundColor: isCurrent
                             ? "var(--button-hover)"
                             : isIncomplete
-                            ? "rgba(239, 68, 68, 0.1)"
-                            : "transparent",
+                              ? "rgba(239, 68, 68, 0.1)"
+                              : "transparent",
                           cursor: "pointer",
                           transition: "background-color 0.2s ease",
                         }}
@@ -3277,7 +3719,8 @@ const SongCreate = (): React.ReactElement => {
                   }
                   style={{
                     opacity: !file && files.length === 0 ? 0.6 : 1,
-                    cursor: !file && files.length === 0 ? "not-allowed" : "text",
+                    cursor:
+                      !file && files.length === 0 ? "not-allowed" : "text",
                   }}
                 />
                 {showResults && searchResults.length > 0 && (
@@ -3876,17 +4319,19 @@ const SongCreate = (): React.ReactElement => {
               ? addMode === "bandcamp"
                 ? "adding..."
                 : files.length > 1 && currentFileIndex !== null
-                ? `uploading ${currentFileIndex + 1}/${files.length}...`
-                : "uploading..."
+                  ? `uploading ${currentFileIndex + 1}/${files.length}...`
+                  : "uploading..."
               : addMode === "bandcamp"
-              ? searchLoading
-                ? "processing..."
-                : !songUrl
-                ? "waiting for url..."
-                : "add song"
-              : files.length > 1 && currentFileIndex !== null
-              ? `add song ${currentFileIndex + 1}/${files.length}`
-              : "create song"}
+                ? searchLoading
+                  ? "processing..."
+                  : !songUrl
+                    ? "waiting for url..."
+                    : "add song"
+                : files.length > 1
+                  ? incompleteFiles.size > 0
+                    ? `add all songs (${files.length - incompleteFiles.size}/${files.length} complete)`
+                    : `add all songs (${files.length})`
+                  : "create song"}
           </button>
           <button
             type="button"
