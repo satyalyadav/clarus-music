@@ -885,8 +885,16 @@ const SongCreate = (): React.ReactElement => {
 
     const trimmedQuery = searchQuery.trim();
 
-    // Upload mode: skip if empty or if it's a Bandcamp URL (should use Bandcamp mode for that)
+    // Upload mode: require a file to be added before searching
     if (addMode === "upload") {
+      // Disable search if no file is added
+      if (!file && files.length === 0) {
+        setSearchResults([]);
+        setShowResults(false);
+        setError(null);
+        return;
+      }
+
       if (trimmedQuery.length === 0) {
         setSearchResults([]);
         setShowResults(false);
@@ -1514,6 +1522,8 @@ const SongCreate = (): React.ReactElement => {
       // Track the primary artist ID for song creation (used when artists are created from pending names)
       let resolvedPrimaryArtistId: number | null = null;
       let resolvedSelectedArtistIds: number[] = [];
+      // Track the resolved album ID (used when album is created from pending name)
+      let resolvedAlbumId: number | null = null;
 
       // Create artists and albums from pending names (from search results) before creating the song
       if (pendingArtistNames.length > 0) {
@@ -1759,6 +1769,7 @@ const SongCreate = (): React.ReactElement => {
         }
 
         if (album?.album_id) {
+          resolvedAlbumId = album.album_id;
           setAlbumId(album.album_id.toString());
         }
 
@@ -1865,6 +1876,9 @@ const SongCreate = (): React.ReactElement => {
         resolvedSelectedArtistIds.length > 0
           ? resolvedSelectedArtistIds
           : selectedArtistIds;
+      // Use resolved album ID (from pending name) or fall back to state
+      const finalAlbumId =
+        resolvedAlbumId ?? (albumId ? parseInt(albumId) : null);
 
       if (!finalArtistId) {
         setError("Artist is required");
@@ -1876,7 +1890,7 @@ const SongCreate = (): React.ReactElement => {
       const newSongId = await songService.create({
         title: title.trim(),
         artist_id: finalArtistId,
-        album_id: albumId ? parseInt(albumId) : null,
+        album_id: finalAlbumId,
         duration: finalDuration,
         file_blob: fileBlob,
         url: songUrl || null,
@@ -3252,10 +3266,19 @@ const SongCreate = (): React.ReactElement => {
                   className="form-input"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="type song name or paste Spotify link..."
+                  placeholder={
+                    file || files.length > 0
+                      ? "type song name or paste Spotify link..."
+                      : "add a file first to search for metadata..."
+                  }
+                  disabled={!file && files.length === 0}
                   onFocus={() =>
                     searchResults.length > 0 && setShowResults(true)
                   }
+                  style={{
+                    opacity: !file && files.length === 0 ? 0.6 : 1,
+                    cursor: !file && files.length === 0 ? "not-allowed" : "text",
+                  }}
                 />
                 {showResults && searchResults.length > 0 && (
                   <div
