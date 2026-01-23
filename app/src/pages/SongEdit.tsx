@@ -10,7 +10,6 @@ import {
   Artist,
 } from "../services/db";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
-import { artistImageService } from "../services/artistImageService";
 
 interface SearchResult {
   title: string;
@@ -359,7 +358,6 @@ const SongEdit: React.FC = () => {
       if (!id || !song) return;
       const songId = parseInt(id);
       const oldAlbumId = song.album_id;
-      const oldArtistId = song.artist_id;
 
       // Resolve artists
       let resolvedPrimaryArtistId: number | null = null;
