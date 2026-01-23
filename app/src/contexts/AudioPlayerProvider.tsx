@@ -159,13 +159,11 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
     const nextIndex = actualCurrentIndex + 1;
     if (nextIndex >= 0 && nextIndex < queue.length) {
       const nextTrack = queue[nextIndex];
-      setCurrentIndex(nextIndex);
-      audioRef.current.src = nextTrack.url;
-      setCurrentTrack(nextTrack);
-      audioRef.current.play();
-      setIsPlaying(true);
+      // Use playTrack instead of directly setting src to ensure proper error handling
+      // and blob URL validation
+      playTrack(nextTrack, nextIndex);
     }
-  }, [queue, resolveCurrentIndex]);
+  }, [queue, resolveCurrentIndex, playTrack]);
 
   const playPrevious = useCallback(() => {
     const actualCurrentIndex = resolveCurrentIndex();
@@ -174,13 +172,11 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
     const prevIndex = actualCurrentIndex - 1;
     if (prevIndex >= 0 && prevIndex < queue.length) {
       const prevTrack = queue[prevIndex];
-      setCurrentIndex(prevIndex);
-      audioRef.current.src = prevTrack.url;
-      setCurrentTrack(prevTrack);
-      audioRef.current.play();
-      setIsPlaying(true);
+      // Use playTrack instead of directly setting src to ensure proper error handling
+      // and blob URL validation
+      playTrack(prevTrack, prevIndex);
     }
-  }, [queue, resolveCurrentIndex]);
+  }, [queue, resolveCurrentIndex, playTrack]);
 
   const addToQueue = (track: Track) => {
     setQueue((prev) => {
@@ -245,6 +241,9 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
   const playNextRef = useRef(playNext);
   const playPreviousRef = useRef(playPrevious);
   const togglePlayPauseRef = useRef(togglePlayPause);
+  const queueRef = useRef(queue);
+  const currentTrackRef = useRef(currentTrack);
+  const currentIndexRef = useRef(currentIndex);
 
   useEffect(() => {
     playNextRef.current = playNext;
@@ -257,6 +256,18 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
   useEffect(() => {
     togglePlayPauseRef.current = togglePlayPause;
   }, [togglePlayPause]);
+
+  useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
+
+  useEffect(() => {
+    currentTrackRef.current = currentTrack;
+  }, [currentTrack]);
+
+  useEffect(() => {
+    currentIndexRef.current = currentIndex;
+  }, [currentIndex]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -277,14 +288,42 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
       playNextRef.current();
     };
     const onError = (e: Event) => {
+      const error = (audio as any).error;
+      const errorCode = error?.code;
+      const errorMessage = error?.message || "Unknown error";
+      
       console.error(
         "Audio error:",
         e,
         "URL:",
         audio.src,
         "Error code:",
-        (audio as any).error?.code
+        errorCode,
+        "Error message:",
+        errorMessage
       );
+      
+      // Check if it's a blob URL that failed (error code 4 = MEDIA_ELEMENT_ERROR: Format error)
+      // This often happens when blob URLs are revoked or invalid
+      if (audio.src.startsWith("blob:") && (errorCode === 4 || errorCode === 2)) {
+        console.error(
+          "Blob URL appears to be invalid or revoked:",
+          audio.src,
+          "This can happen when blob URLs are revoked while still in use."
+        );
+        // Try to continue to next track if available
+        const currentTrack = currentTrackRef.current;
+        const queue = queueRef.current;
+        const currentIndex = currentIndexRef.current;
+        
+        if (currentTrack && queue.length > 0 && currentIndex >= 0 && currentIndex < queue.length - 1) {
+          console.log("Attempting to play next track after blob URL error");
+          setTimeout(() => {
+            playNextRef.current();
+          }, 100);
+        }
+      }
+      
       setIsPlaying(false);
     };
     const onCanPlay = () => {
