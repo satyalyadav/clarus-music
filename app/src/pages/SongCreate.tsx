@@ -331,15 +331,13 @@ const SongCreate = (): React.ReactElement => {
           if (metadata.common.picture && metadata.common.picture.length > 0) {
             const picture = metadata.common.picture[0];
             try {
-              // Convert Uint8Array/Buffer to base64 properly (handles large arrays)
+              // Convert Uint8Array to base64 properly (handles large arrays)
               // Process in chunks to avoid "Maximum call stack size exceeded" errors
               let data: Uint8Array;
               
-              // Handle different data types (Uint8Array, Buffer, etc.)
+              // Handle different data types (Uint8Array, Array, etc.)
               if (picture.data instanceof Uint8Array) {
                 data = picture.data;
-              } else if (Buffer.isBuffer(picture.data)) {
-                data = new Uint8Array(picture.data);
               } else if (Array.isArray(picture.data)) {
                 data = new Uint8Array(picture.data);
               } else {
