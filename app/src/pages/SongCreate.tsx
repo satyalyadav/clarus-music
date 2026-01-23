@@ -328,13 +328,50 @@ const SongCreate = (): React.ReactElement => {
           const arrayBuffer = await file.arrayBuffer();
           const metadata = await parseBuffer(new Uint8Array(arrayBuffer));
 
-
           if (metadata.common.picture && metadata.common.picture.length > 0) {
             const picture = metadata.common.picture[0];
-            const base64String = String.fromCharCode(...picture.data);
-            const base64 = btoa(base64String);
-            const format = picture.format || "image/jpeg";
-            coverArt = `data:${format};base64,${base64}`;
+            try {
+              // Convert Uint8Array/Buffer to base64 properly (handles large arrays)
+              // Process in chunks to avoid "Maximum call stack size exceeded" errors
+              let data: Uint8Array;
+              
+              // Handle different data types (Uint8Array, Buffer, etc.)
+              if (picture.data instanceof Uint8Array) {
+                data = picture.data;
+              } else if (Buffer.isBuffer(picture.data)) {
+                data = new Uint8Array(picture.data);
+              } else if (Array.isArray(picture.data)) {
+                data = new Uint8Array(picture.data);
+              } else {
+                // Try to convert to Uint8Array
+                data = new Uint8Array(picture.data as any);
+              }
+              
+              let binaryString = '';
+              const chunkSize = 8192; // Process 8KB chunks at a time
+              
+              for (let i = 0; i < data.length; i += chunkSize) {
+                const chunk = data.slice(i, Math.min(i + chunkSize, data.length));
+                // Convert chunk to array for apply()
+                const chunkArray = Array.from(chunk);
+                binaryString += String.fromCharCode.apply(null, chunkArray);
+              }
+              
+              const base64 = btoa(binaryString);
+              const format = picture.format || "image/jpeg";
+              coverArt = `data:${format};base64,${base64}`;
+              
+              if (import.meta.env.DEV) {
+                console.log(`Successfully extracted cover art for ${file.name} (${data.length} bytes, format: ${format})`);
+              }
+            } catch (base64Error) {
+              console.warn(`Failed to convert cover art to base64 for ${file.name}:`, base64Error);
+              // coverArt remains undefined, will be handled gracefully
+            }
+          } else {
+            if (import.meta.env.DEV) {
+              console.debug(`No cover art found in metadata for ${file.name}`);
+            }
           }
 
           // Extract album, artist, and title from ID3 tags
@@ -348,8 +385,10 @@ const SongCreate = (): React.ReactElement => {
             id3Title = metadata.common.title;
           }
         } catch (coverArtError) {
-          // Ignore metadata extraction errors
-          console.debug(`No metadata found for ${file.name}`);
+          // Log error but don't fail the whole operation
+          if (import.meta.env.DEV) {
+            console.warn(`Error extracting metadata from ${file.name}:`, coverArtError);
+          }
         }
 
         metadataMap.set(i, {
@@ -3433,9 +3472,9 @@ const SongCreate = (): React.ReactElement => {
                           >
                             {index + 1}
                           </div>
-                          {metadata?.coverArt && (
+                          {(metadata?.coverArt || fileState?.coverImage) && (
                             <img
-                              src={metadata.coverArt}
+                              src={metadata?.coverArt || fileState?.coverImage || ""}
                               alt="Cover art"
                               style={{
                                 width: "40px",
@@ -3443,6 +3482,10 @@ const SongCreate = (): React.ReactElement => {
                                 objectFit: "cover",
                                 borderRadius: "4px",
                                 flexShrink: 0,
+                              }}
+                              onError={(e) => {
+                                // Hide broken images
+                                (e.target as HTMLImageElement).style.display = "none";
                               }}
                             />
                           )}
