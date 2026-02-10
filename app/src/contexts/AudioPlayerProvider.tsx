@@ -11,6 +11,10 @@ import {
   Track,
   AudioPlayerContextProps,
 } from "./AudioPlayerContext";
+import { saveQueueState, loadQueueState } from "../utils/queuePersistence";
+import { getSongsWithRelations, getSongUrl } from "../services/db";
+import { createTrackFromSong } from "../utils/trackUtils";
+import type { SongWithRelations } from "../services/db";
 
 export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
   children,
@@ -24,6 +28,13 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [lastQueueInsertIndex, setLastQueueInsertIndex] = useState<number>(-1);
   const audioRef = useRef<HTMLAudioElement>(new Audio());
+  const isRestoringRef = useRef(false);
+  const hasRestoredRef = useRef(false);
+  const lastSavedStructuralRef = useRef({
+    queueLen: 0,
+    index: -1,
+    songId: null as number | null,
+  });
 
   const playTrack = (track: Track, index?: number) => {
     try {
@@ -488,6 +499,123 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
     }
     setLastQueueInsertIndex(-1);
   };
+
+  // Restore queue and position from localStorage on mount (once)
+  useEffect(() => {
+    if (hasRestoredRef.current) return;
+    hasRestoredRef.current = true;
+    const stored = loadQueueState();
+    if (!stored?.songIds?.length) return;
+
+    isRestoringRef.current = true;
+    const clearRestoring = () => {
+      isRestoringRef.current = false;
+    };
+
+    getSongsWithRelations()
+      .then((allSongs) => {
+        const byId = new Map(
+          allSongs
+            .filter((s): s is SongWithRelations & { song_id: number } =>
+              Boolean(s.song_id)
+            )
+            .map((s) => [s.song_id, s])
+        );
+        const ordered = stored.songIds
+          .map((id) => byId.get(id))
+          .filter(Boolean) as SongWithRelations[];
+        if (ordered.length === 0) {
+          clearRestoring();
+          return;
+        }
+        return Promise.all(
+          ordered.map((song) =>
+            getSongUrl(song)
+              .then((url) => createTrackFromSong(song, url))
+              .catch(() => null)
+          )
+        ).then((tracks) => {
+          const validTracks = tracks.filter(
+            (t): t is Track => t !== null && Boolean(t?.url)
+          );
+          if (validTracks.length === 0) {
+            clearRestoring();
+            return;
+          }
+          const idx = Math.min(
+            Math.max(0, stored.currentIndex),
+            validTracks.length - 1
+          );
+          wrappedSetQueue(validTracks);
+          setTimeout(() => {
+            playTrack(validTracks[idx], idx);
+            seek(stored.currentTime);
+            if (!stored.wasPlaying) {
+              audioRef.current.pause();
+              setIsPlaying(false);
+            }
+            clearRestoring();
+          }, 100);
+        });
+      })
+      .catch(clearRestoring);
+  }, []);
+
+  // Persist queue and position: save immediately when queue/current track change (so refresh keeps state), debounce when only time/playing changes
+  useEffect(() => {
+    if (isRestoringRef.current) return;
+    const songIds = queue
+      .filter((t): t is Track & { songId: number } => t.songId != null)
+      .map((t) => t.songId);
+    if (songIds.length === 0) return;
+
+    const currentIdx =
+      currentIndex >= 0 && currentIndex < queue.length
+        ? currentIndex
+        : queue.findIndex(
+            (t) =>
+              t.songId === currentTrack?.songId || t.url === currentTrack?.url
+          );
+    // Persist index in songIds space so restore (which only has those tracks) gets the right song
+    const indexInSongIds =
+      currentTrack?.songId != null
+        ? songIds.indexOf(currentTrack.songId)
+        : -1;
+    const indexToSave = indexInSongIds >= 0 ? indexInSongIds : 0;
+
+    const structural = {
+      queueLen: queue.length,
+      index: currentIdx,
+      songId: currentTrack?.songId ?? null,
+    };
+    const structuralChanged =
+      lastSavedStructuralRef.current.queueLen !== structural.queueLen ||
+      lastSavedStructuralRef.current.index !== structural.index ||
+      lastSavedStructuralRef.current.songId !== structural.songId;
+
+    const doSave = () => {
+      saveQueueState({
+        songIds,
+        currentIndex: indexToSave,
+        currentTime,
+        wasPlaying: isPlaying,
+      });
+    };
+
+    if (structuralChanged) {
+      lastSavedStructuralRef.current = structural;
+      doSave();
+      return;
+    }
+
+    const timeoutId = setTimeout(
+      () => {
+        doSave();
+      },
+      1500
+    );
+    return () => clearTimeout(timeoutId);
+  }, [queue, currentIndex, currentTrack, currentTime, isPlaying]);
 
   // Create context value - create new object on every render to ensure updates are detected
   const value: AudioPlayerContextProps = useMemo(
