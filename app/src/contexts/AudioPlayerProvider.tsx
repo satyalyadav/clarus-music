@@ -549,7 +549,40 @@ export const AudioPlayerProvider: React.FC<{ children: ReactNode }> = ({
           wrappedSetQueue(validTracks);
           setTimeout(() => {
             playTrack(validTracks[idx], idx);
-            seek(stored.currentTime);
+
+            // Seek only after audio is actually seekable (metadata loaded).
+            // Otherwise setting currentTime can be ignored and snap back to 0.
+            const audio = audioRef.current;
+            const targetTime = stored.currentTime;
+            const applySeek = () => {
+              if (typeof targetTime !== "number" || !Number.isFinite(targetTime)) {
+                return;
+              }
+              if (targetTime <= 0) {
+                return;
+              }
+              const dur = audio.duration;
+              const clamped =
+                typeof dur === "number" && Number.isFinite(dur) && dur > 0
+                  ? Math.min(targetTime, Math.max(0, dur - 0.25))
+                  : targetTime;
+              audio.currentTime = clamped;
+              setCurrentTime(clamped);
+            };
+
+            const isSeekableNow =
+              audio.readyState >= 1 && // HAVE_METADATA
+              typeof audio.seekable !== "undefined" &&
+              audio.seekable.length > 0;
+
+            if (isSeekableNow) {
+              applySeek();
+            } else {
+              const onReady = () => applySeek();
+              audio.addEventListener("loadedmetadata", onReady, { once: true });
+              audio.addEventListener("canplay", onReady, { once: true });
+            }
+
             if (!stored.wasPlaying) {
               audioRef.current.pause();
               setIsPlaying(false);
