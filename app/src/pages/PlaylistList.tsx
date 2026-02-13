@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { playlistService, getSongsWithRelations, SongWithRelations } from "../services/db";
 import { PlaylistCover } from "../utils/playlistCover";
+import { getErrorMessage } from "../utils/errorUtils";
 
 interface Playlist {
   playlist_id?: number;
@@ -53,8 +54,8 @@ const PlaylistList: React.FC = () => {
       
       setPlaylists(playlistsWithSongs);
       setError(null);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to load playlists"));
     } finally {
       setLoading(false);
     }
@@ -70,8 +71,8 @@ const PlaylistList: React.FC = () => {
     try {
       await playlistService.delete(id);
       fetchPlaylists();
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to delete playlist"));
     }
   };
 

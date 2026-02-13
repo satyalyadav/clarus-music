@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { artistService, Artist } from "../services/db";
 import { artistImageService } from "../services/artistImageService";
+import { getErrorMessage } from "../utils/errorUtils";
 
 const ArtistList: React.FC = () => {
   const [artists, setArtists] = useState<Artist[]>([]);
@@ -25,7 +26,7 @@ const ArtistList: React.FC = () => {
           });
         });
       })
-      .catch((err) => setError(err.message))
+      .catch((err) => setError(getErrorMessage(err, "Failed to load artists")))
       .finally(() => setLoading(false));
   }, []);
 

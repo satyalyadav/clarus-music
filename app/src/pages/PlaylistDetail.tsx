@@ -97,8 +97,8 @@ const PlaylistDetail: React.FC = () => {
         });
       }
       setError(null);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to load playlist"));
     } finally {
       setLoading(false);
     }
@@ -159,8 +159,8 @@ const PlaylistDetail: React.FC = () => {
       const playlistId = parseInt(id);
       await playlistService.removeSong(playlistId, songId);
       fetchPlaylist();
-    } catch (err: any) {
-      alert(err.message || "Failed to remove song");
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to remove song"));
     }
   };
 
@@ -181,10 +181,10 @@ const PlaylistDetail: React.FC = () => {
         .map((s) => s.song_id)
         .filter((id): id is number => id !== undefined);
       await playlistService.setSongs(playlistId, songIds);
-    } catch (err: any) {
+    } catch (err) {
       // Revert on error
       fetchPlaylist();
-      alert(err.message || "Failed to reorder songs");
+      alert(getErrorMessage(err, "Failed to reorder songs"));
     }
   };
 

@@ -10,6 +10,7 @@ import {
   Artist,
 } from "../services/db";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
+import { getErrorMessage } from "../utils/errorUtils";
 
 interface SearchResult {
   title: string;
@@ -242,9 +243,9 @@ const SongEdit: React.FC = () => {
 
         setSearchResults(results);
         setShowResults(true);
-      } catch (err: any) {
+      } catch (err) {
         console.error("Search error:", err);
-        setError(err.message || "Failed to search Spotify");
+        setError(getErrorMessage(err, "Failed to search Spotify"));
         setSearchResults([]);
       } finally {
         setSearchLoading(false);
@@ -512,8 +513,8 @@ const SongEdit: React.FC = () => {
       setPendingArtistNameToIdMap(new Map());
 
       navigate("/songs");
-    } catch (err: any) {
-      setError(err.message || "Failed to update song");
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to update song"));
     } finally {
       setLoading(false);
     }
@@ -535,8 +536,8 @@ const SongEdit: React.FC = () => {
       }
       
       navigate("/songs");
-    } catch (err: any) {
-      setError(err.message || "Failed to delete song");
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to delete song"));
       setDeleting(false);
     }
   };

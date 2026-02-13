@@ -90,8 +90,8 @@ const AlbumDetail: React.FC = () => {
           });
         }
         setError(null);
-      } catch (err: any) {
-        setError(err.message);
+      } catch (err) {
+        setError(getErrorMessage(err, "Failed to load album"));
       } finally {
         setLoading(false);
       }

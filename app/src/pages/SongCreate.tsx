@@ -9,6 +9,7 @@ import {
   Artist,
 } from "../services/db";
 import { artistImageService } from "../services/artistImageService";
+import { getErrorMessage } from "../utils/errorUtils";
 
 interface SearchResult {
   title: string;
@@ -1026,7 +1027,7 @@ const SongCreate = (): React.ReactElement => {
           source: "bandcamp",
         },
       };
-    } catch (error: any) {
+    } catch (error) {
       console.error("Error extracting Bandcamp metadata:", error);
       throw error;
     }
@@ -1378,13 +1379,15 @@ const SongCreate = (): React.ReactElement => {
           setSearchResults(results);
           setShowResults(true);
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error("Search error:", err);
         setError(
-          err.message ||
-            (addMode === "bandcamp"
+          getErrorMessage(
+            err,
+            addMode === "bandcamp"
               ? "Failed to extract metadata from Bandcamp URL"
-              : "Failed to search Spotify"),
+              : "Failed to search Spotify",
+          ),
         );
         setSearchResults([]);
       } finally {
@@ -1709,9 +1712,9 @@ const SongCreate = (): React.ReactElement => {
           return newMap;
         });
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error("Error setting metadata:", err);
-      setError(err.message || "Failed to set metadata");
+      setError(getErrorMessage(err, "Failed to set metadata"));
     }
   };
 
@@ -2300,10 +2303,10 @@ const SongCreate = (): React.ReactElement => {
             );
 
             successCount++;
-          } catch (err: any) {
+          } catch (err) {
             errorCount++;
             errors.push(
-              `File ${i + 1}: ${err.message || "Failed to create song"}`,
+              `File ${i + 1}: ${getErrorMessage(err, "Failed to create song")}`,
             );
             console.error(`Error creating song for file ${i + 1}:`, err);
           }
@@ -2395,8 +2398,8 @@ const SongCreate = (): React.ReactElement => {
       );
 
       navigate("/songs");
-    } catch (err: any) {
-      setError(err.message || "Failed to create song");
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to create song"));
     } finally {
       setLoading(false);
     }
@@ -2857,7 +2860,7 @@ const SongCreate = (): React.ReactElement => {
             .filter((id): id is number => id !== null && id !== undefined);
           await songArtistService.setArtistsForSong(newSongId, trackArtistIds);
           successCount++;
-        } catch (err: any) {
+        } catch (err) {
           console.error(`Failed to create song "${track.title}":`, err);
           errorCount++;
         }
@@ -2882,8 +2885,8 @@ const SongCreate = (): React.ReactElement => {
           }`,
         );
       }
-    } catch (err: any) {
-      setError(err.message || "Failed to add album tracks");
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to add album tracks"));
     } finally {
       setLoading(false);
     }

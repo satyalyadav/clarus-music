@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { playlistService, getSongsWithRelations, Song } from "../services/db";
+import { getErrorMessage } from "../utils/errorUtils";
 
 interface SongItem extends Song {
   artist_name?: string;
@@ -54,8 +55,8 @@ const PlaylistEdit: React.FC = () => {
       const playlistId = parseInt(id);
       await playlistService.update(playlistId, { title });
       navigate(`/playlists/${id}`);
-    } catch (err: any) {
-      setError(err.message || "Failed to update playlist");
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to update playlist"));
     } finally {
       setLoading(false);
     }
@@ -74,8 +75,8 @@ const PlaylistEdit: React.FC = () => {
         return enrichedSong || song;
       });
       setPlaylistSongs(enrichedPlaylistSongs);
-    } catch (err: any) {
-      alert(err.message || "Failed to add song");
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to add song"));
     } finally {
       setAdding(false);
     }
@@ -87,8 +88,8 @@ const PlaylistEdit: React.FC = () => {
       const playlistId = parseInt(id);
       await playlistService.removeSong(playlistId, songId);
       setPlaylistSongs((prev) => prev.filter((s) => s.song_id !== songId));
-    } catch (err: any) {
-      alert(err.message || "Failed to remove song");
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to remove song"));
     }
   };
 

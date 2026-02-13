@@ -164,8 +164,8 @@ const ArtistDetail: React.FC = () => {
           }
         }
         setError(null);
-      } catch (err: any) {
-        setError(err.message);
+      } catch (err) {
+        setError(getErrorMessage(err, "Failed to load artist"));
       } finally {
         setLoading(false);
       }

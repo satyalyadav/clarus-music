@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { playlistService } from "../services/db";
+import { getErrorMessage } from "../utils/errorUtils";
 
 const PlaylistCreate: React.FC = () => {
   const navigate = useNavigate();
@@ -18,8 +19,8 @@ const PlaylistCreate: React.FC = () => {
         title,
       });
       navigate(`/playlists/${playlistId}`);
-    } catch (err: any) {
-      setError(err.message || "Failed to create playlist");
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to create playlist"));
     } finally {
       setLoading(false);
     }

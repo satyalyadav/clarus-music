@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { albumService, songService, artistService } from "../services/db";
+import { getErrorMessage } from "../utils/errorUtils";
 
 interface Album {
   album_id?: number;
@@ -174,8 +175,8 @@ const AlbumList: React.FC = () => {
 
         setAlbums(albumsWithCovers);
         setError(null);
-      } catch (err: any) {
-        setError(err.message);
+      } catch (err) {
+        setError(getErrorMessage(err, "Failed to load albums"));
       } finally {
         setLoading(false);
       }

@@ -192,8 +192,8 @@ const SongList: React.FC = () => {
 
       syncSongUrls(songsData);
       await prefetchSongUrls(songsData);
-    } catch (err: any) {
-      setError(err.message || "Failed to delete songs");
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to delete songs"));
     } finally {
       setDeleting(false);
     }
